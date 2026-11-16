@@ -114,4 +114,6 @@ It validates the skeleton, samples 30 fps, removes travel, keeps the crouch/weig
 
 The GitHub Actions workflow tests, builds and deploys the default branch to GitHub Pages when Pages is configured for Actions. `dist/` can also be hosted on any HTTPS static host; relative paths support a repository subdirectory.
 
+**One-time Pages setup:** open [repository Settings → Pages](https://github.com/Ali-sial-786/BasketballVR/settings/pages), set **Build and deployment → Source → GitHub Actions**, then run **Test, build and deploy RIMRUN** from the Actions tab. The GitHub connection used to build this game can push source but cannot enable Pages (GitHub returns HTTP 403 for that administrative action). Until enabled, CI still passes and publishes a downloadable `rimrun-static-site` build artifact. Once configured, the game will be at `https://ali-sial-786.github.io/BasketballVR/`.
+
 Automated tests cover the actual simulation and athlete assets, and Chromium checks cover desktop and touch controls. Physical Quest rendering, controller ergonomics, comfort and sustained headset frame rate require hardware testing. This is a playable first version for iteration, with human-like models rather than a photorealistic NBA production asset set.

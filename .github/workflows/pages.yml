@@ -14,6 +14,8 @@ concurrency:
 jobs:
   test-and-build:
     runs-on: ubuntu-latest
+    outputs:
+      pages_enabled: ${{ steps.pages.outputs.enabled }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -26,8 +28,28 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rimrun-static-site
+          path: dist
+          retention-days: 14
+      - name: Check Pages configuration
+        id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pages_mode="$(gh api repos/${{ github.repository }}/pages --jq .build_type 2>/dev/null || true)"
+          if [ "$pages_mode" = "workflow" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            cat >> "$GITHUB_STEP_SUMMARY" <<'NOTE'
+          Game tests and production build passed. The built site is available in the rimrun-static-site artifact.
+
+          To publish, open repository Settings → Pages → Build and deployment → Source → GitHub Actions, then run this workflow again.
+          NOTE
   deploy:
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && needs.test-and-build.outputs.pages_enabled == 'true'
     needs: test-and-build
     runs-on: ubuntu-latest
     environment:
