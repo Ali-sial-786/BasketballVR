@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#193938" />
+  <meta name="description" content="RIMRUN: feel-good street basketball in your browser and in VR. Play 1v1, 2v2, shoot around, or enter the three-point contest." />
+  <title>RIMRUN — Own the court.</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/fonts.css" />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="app" aria-label="3D basketball court"></div>
+  <div class="screen-shade"></div>
+  <div id="loading"><div class="loading-ball">◒</div><strong>FINDING YOUR COURT<span>…</span></strong></div>
+  <div id="fatal" hidden role="alert"></div>
+  <header class="site-header">
+    <button id="home" class="brand" aria-label="RIMRUN home">
+      <svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="17"/><path d="M4 20h32M20 3v34M8 8c15 7 9 17 24 24M8 32c15-7 9-17 24-24"/></svg>
+      <span>RIMRUN<small>V R</small></span>
+    </button>
+    <div class="header-location"><span class="live-dot"></span> THE NEIGHBORHOOD <span class="divider">/</span> COURT 01</div>
+    <nav aria-label="Game options">
+      <button id="sound-toggle" class="icon-button" aria-label="Mute sound" title="Sound"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5ZM15 8c3 2 3 6 0 8M18 5c5 4 5 10 0 14"/></svg></button>
+      <button id="settings-open" class="icon-button" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6M16 14v6"/></svg></button>
+      <button id="help-open" class="help-button">HOW TO PLAY <span>↗</span></button>
+    </nav>
+  </header>
+  <main id="menu" class="menu">
+    <section class="menu-content" aria-label="Choose your game">
+      <div class="eyebrow"><span class="tiny-line"></span> PICKUP BASKETBALL. PURE FEELING.</div>
+      <h1>ALL HEART.<br><em>ALL HOOPS.</em><span class="title-dot">●</span></h1>
+      <p class="intro">A ball. A basket. Your next favorite game.<br>Find your rhythm, then run the neighborhood.</p>
+      <div class="section-label"><span>CHOOSE YOUR RUN</span><span>01 — 04</span></div>
+      <div class="mode-grid" role="group" aria-label="Game mode">
+        <button class="mode-card selected" data-mode="1v1" aria-pressed="true"><span class="mode-number">1<span>v</span>1</span><span class="mode-copy"><strong>ISO BALL</strong><small>You. Them. All game.</small></span><span class="mode-arrow">↗</span></button>
+        <button class="mode-card" data-mode="2v2" aria-pressed="false"><span class="mode-number">2<span>v</span>2</span><span class="mode-copy"><strong>RUN TOGETHER</strong><small>Find your plus one.</small></span><span class="mode-arrow">↗</span></button>
+        <button class="mode-card" data-mode="contest" aria-pressed="false"><span class="mode-number">3<span class="pt">PT</span></span><span class="mode-copy"><strong>MAKE IT RAIN</strong><small>The three-point contest.</small></span><span class="mode-arrow">↗</span></button>
+        <button class="mode-card" data-mode="practice" aria-pressed="false"><span class="mode-number infinity">∞</span><span class="mode-copy"><strong>SHOOTAROUND</strong><small>No clock. Just buckets.</small></span><span class="mode-arrow">↗</span></button>
+      </div>
+      <div class="difficulty-row"><span class="section-label">YOUR COMPETITION</span><div class="segmented" role="group" aria-label="Difficulty"><button data-difficulty="rookie">ROOKIE</button><button data-difficulty="park" class="active">PARK</button><button data-difficulty="allstar">ALL-STAR</button></div></div>
+      <div class="play-row"><button id="play" class="primary">LET’S RUN IT <span>↗</span></button><button id="enter-vr" class="vr-button" title="Open in a WebXR headset browser"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16l2 9-3 2h-4l-3-3-3 3H5l-3-2 2-9ZM7 11h2M15 11h2"/></svg><span>PLAY IN VR</span></button></div>
+      <p class="play-note" id="vr-status"><span class="mini-dot"></span> DESKTOP READY <span>·</span> QUEST 3 / 3S COMPATIBLE</p>
+    </section>
+    <aside class="court-badge"><span class="court-tag">GOOD RUNS. GOLDEN HOUR.</span><div><h2>Sunset Park.</h2><span class="court-badge-arrow">↗</span></div><p>THE NEIGHBORHOOD <span>●</span> OUTDOOR / HALF COURT</p></aside>
+    <footer class="menu-footer"><span>NO DOWNLOADS. ALL GAME.</span><span id="personal-best">FIVE RACKS. ONE HOT HAND.</span></footer>
+  </main>
+  <section id="hud" class="hud" aria-label="Game status" hidden>
+    <div class="hud-top"><button id="pause" class="hud-menu" aria-label="Pause game"><svg viewBox="0 0 18 18" width="15" height="15" aria-hidden="true"><path d="M5 3v12M13 3v12" stroke="currentColor" stroke-width="2"/></svg><span>MENU</span></button><div class="scoreboard"><div class="score-side home"><span id="home-label">YOU</span><strong id="score-home">00</strong></div><div class="score-middle"><span id="mode-label">1V1 · FIRST TO 11</span><strong id="clock">18</strong><small id="clock-label">SHOT CLOCK</small></div><div class="score-side away"><span id="away-label">THEM</span><strong id="score-away">00</strong></div></div><div class="court-mini">SUNSET PARK <span>● LIVE</span></div></div>
+    <div id="toast" class="toast" role="status"><strong></strong><span></span></div>
+    <div id="shot-feedback" class="shot-feedback"><span class="feedback-label">LAST SHOT</span><strong id="release-text">PERFECT</strong><div><span id="shot-quality">100%</span><span id="shot-contest">OPEN</span><span id="shot-distance">6.8 M</span></div></div>
+    <div class="reticle"><i></i></div>
+    <div class="shot-meter" id="shot-meter"><div class="meter-caption"><span>GATHER → RELEASE</span><strong id="meter-word">FIND THE GREEN</strong></div><div class="meter-track"><div class="green-zone"></div><div class="meter-fill" id="meter-fill"></div><div class="meter-needle" id="meter-needle"></div></div></div>
+    <div id="rack-progress" class="rack-progress" hidden></div>
+    <div class="bottom-hud"><div class="energy"><div class="possession" id="possession">YOUR BALL <span>↗</span></div><div class="energy-label"><span>STAMINA</span><span id="heat-label">HEAT <i>○ ○ ○ ○ ○</i></span></div><div class="energy-track"><div id="stamina-fill"></div></div><div id="combo" class="combo"></div></div><div class="context-help" id="context-help"><span><kbd>HOLD LMB</kbd> gather & shoot</span><span><kbd>Q E R C</kbd> handles</span><span><kbd>SPACE</kbd> jump / block</span></div><canvas id="minimap" width="180" height="180" aria-label="Court map"></canvas></div>
+    <div id="touch-controls"><div id="touch-stick" aria-label="Move"><span></span></div><div class="touch-actions"><button data-action="pass">PASS</button><button data-action="steal">STEAL</button><button data-action="jump">JUMP</button><button data-action="shoot" class="touch-shoot">HOLD<br>SHOOT</button><button data-action="cross">CROSS</button><button data-action="behind">WRAP</button><button data-action="stepback">BACK</button></div></div>
+  </section>
+  <dialog id="dialog" class="dialog"><button id="dialog-close" class="dialog-close" aria-label="Close dialog">×</button><div id="dialog-content"></div></dialog>
+  <div id="blink"></div><div id="vignette"></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
