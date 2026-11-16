@@ -48,6 +48,7 @@ jobs:
 
           To publish, open repository Settings → Pages → Build and deployment → Source → GitHub Actions, then run this workflow again.
           NOTE
+          fi
   deploy:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && needs.test-and-build.outputs.pages_enabled == 'true'
     needs: test-and-build
