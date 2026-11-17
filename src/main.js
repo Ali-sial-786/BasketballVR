@@ -36,7 +36,7 @@ async function init() {
   const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.035, 350);
   const rig = new THREE.Group(); scene.add(rig); rig.add(camera);
   const engine = new GameEngine(), court = new Arena(scene, renderer), effects = new Effects(scene);
-  const input = new Input(renderer, rig, camera, renderer.domElement), hands = new HandsView(scene);
+  const input = new Input(renderer, rig, camera, renderer.domElement), hands = new HandsView(scene, court.environment);
   let players = [], menu = true, demo = false, demoRestart = 0, accumulator = 0, lastTime = null, uiTick = 0, pending = {}, blink = 0, xrBlink = 0, nextFrame = false;
   const demoFocus = new THREE.Vector3(0, 1.2, -2.2), demoPosition = new THREE.Vector3();
   let lastHeadRef = null;
@@ -48,7 +48,9 @@ async function init() {
   function setupPlayers() {
     for (const p of players) p.dispose(scene);
     // Athletes share mesh geometry; each owns its skeleton and kit material.
-    players = engine.players.map(p => new PlayerView(scene, p));
+    players = engine.players.map(p => {
+      const view = new PlayerView(scene, p); view.h.material.envMap = court.environment; view.h.material.envMapIntensity = 0.38; return view;
+    });
   }
   function faceBasket() {
     const h = engine.human;

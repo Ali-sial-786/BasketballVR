@@ -34,9 +34,12 @@ try {
     const style = document.createElement('style'); style.textContent = '.capture-scrimmage #menu,.capture-scrimmage .site-header,.capture-scrimmage .screen-shade{display:none!important}'; document.head.appendChild(style);
   });
   await page.evaluate(() => window.__stepCaptureFrame(0));
-  let chapter = -1;
+  let chapter = -1, introFrame = null;
   for (let frame = 0; frame < fps * seconds; frame++) {
     const t = frame / fps;
+    // Hold the actual opening screen for two seconds. Gameplay chapters are
+    // rendered at every recorded frame; there is no motion interpolation.
+    if (frame > 0 && t < 2 && introFrame) { if (!ffmpeg.stdin.write(introFrame)) await once(ffmpeg.stdin, 'drain'); continue; }
     await page.evaluate(({ t, frame, fps, name, seconds }) => {
       window.__captureTime = t; const g = window.__rimrun, e = g.engine, i = g.input;
       const note = document.getElementById('capture-caption');
@@ -65,6 +68,7 @@ try {
     await page.evaluate(ms => window.__stepCaptureFrame(ms), (frame + 1) * 1000 / fps);
     const { data: jpeg } = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 91, fromSurface: true, captureBeyondViewport: false, optimizeForSpeed: true });
     const data = Buffer.from(jpeg, 'base64');
+    if (frame === 0) introFrame = data;
     if (!ffmpeg.stdin.write(data)) await once(ffmpeg.stdin, 'drain');
     const nextChapter = Math.floor(t / 2); if (nextChapter !== chapter) { chapter = nextChapter; console.log(`${name}: ${t.toFixed(0)} / ${seconds}s captured (${Math.round((Date.now() - began) / 1000)}s elapsed)`); }
   }

@@ -14,16 +14,18 @@ export class Arena {
     Object.assign(this, { scene, renderer, flash: 0, netTime: 0, rackBalls: [], spectators: [] });
     scene.background = new THREE.Color(0x080e18); scene.fog = new THREE.FogExp2(0x0b1422, 0.0075);
     const pmrem = new THREE.PMREMGenerator(renderer), room = new RoomEnvironment();
-    this.environmentTarget = pmrem.fromScene(room, 0.04); scene.environment = this.environmentTarget.texture;
-    scene.environmentIntensity = 0.38; room.dispose(); pmrem.dispose();
+    this.environmentTarget = pmrem.fromScene(room, 0.04); this.environment = this.environmentTarget.texture;
+    // Use reflections on athletes and hardwood; matte walls and the distant
+    // crowd do not need the room's environment lookup on every pixel.
+    room.dispose(); pmrem.dispose();
     scene.add(new THREE.HemisphereLight(0xc8ddf4, 0x423829, 1.1));
     const key = new THREE.DirectionalLight(0xffefdc, 3.2); key.position.set(-4, 14, 3); key.target.position.set(0, 0, 1);
     key.castShadow = true; key.shadow.mapSize.set(2048, 2048); Object.assign(key.shadow.camera, { left: -14, right: 14, top: 15, bottom: -15, near: 0.5, far: 38 });
     key.shadow.normalBias = 0.022; key.shadow.bias = -0.0001; scene.add(key, key.target); this.key = key;
     const fill = new THREE.DirectionalLight(0xb2d5ff, 1.2); fill.position.set(9, 10, -5); scene.add(fill);
-    for (const x of [-6, 6]) for (const z of [-3, 12]) {
-      const light = new THREE.SpotLight(0xf3f5ff, 90, 35, 0.85, 0.7, 2); light.position.set(x, 13, z); light.target.position.set(x * 0.3, 0, z); scene.add(light, light.target);
-    }
+    // The broad overhead key, fill and room environment cover the hardwood.
+    // Individual fixture meshes supply the visual lights without four extra
+    // per-pixel spot-light evaluations across the full court and crowd.
     this.floor(); this.hoop(); this.bowl(); this.roof(); this.jumbotron(); this.farBasket(); this.racks();
     this.drawScore({ score: [0, 0], mode: 'preview', shotClock: 18, contestTime: 70 }); this.batchStatic();
   }
@@ -76,7 +78,7 @@ export class Arena {
     texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
     const bump = canvasTexture(128, 512, (c, w, h) => { c.fillStyle = '#888'; c.fillRect(0, 0, w, h); for (let i = 0; i < 160; i++) { c.strokeStyle = i % 2 ? '#999' : '#777'; c.beginPath(); const x = random() * w; c.moveTo(x, 0); c.lineTo(x + (random() - 0.5) * 3, h); c.stroke(); } });
     bump.colorSpace = THREE.NoColorSpace; bump.wrapS = bump.wrapT = THREE.RepeatWrapping; bump.repeat.set(40, 18);
-    const finish = new THREE.MeshPhysicalMaterial({ color: 0xffffff, map: texture, bumpMap: bump, bumpScale: 0.0015, roughness: 0.33, metalness: 0.03, clearcoat: 0.55, clearcoatRoughness: 0.2 });
+    const finish = new THREE.MeshStandardMaterial({ color: 0xffffff, map: texture, bumpMap: bump, bumpScale: 0.0015, roughness: 0.34, metalness: 0.03, envMap: this.environment, envMapIntensity: 0.38 });
     const floor = mesh(new THREE.PlaneGeometry(width, length), finish, scene, [0, 0.013, 6]); floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true;
     for (const x of [-9.55, 9.55]) box(scene, [0.08, 0.05, 32], [x, 0.015, 6], palette.steel);
   }
@@ -102,25 +104,26 @@ export class Arena {
     const seats = new THREE.InstancedMesh(seatGeometry, material(0xffffff), locations.length), matrix = new THREE.Matrix4(), q = new THREE.Quaternion(), color = new THREE.Color();
     let seed = 817; const random = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
     const occupied = locations.filter(() => random() > 0.27);
-    const headParts = [new THREE.SphereGeometry(1, 8, 6)];
-    const nose = new THREE.SphereGeometry(0.22, 5, 4); nose.scale(0.7, 0.85, 1.2); nose.translate(0, -0.03, 0.94); headParts.push(nose);
-    for (const side of [-1, 1]) { const ear = new THREE.SphereGeometry(0.17, 5, 4); ear.scale(0.5, 1.3, 0.75); ear.translate(side * 0.96, 0, 0); headParts.push(ear); }
+    const crowdMaterial = () => new THREE.MeshLambertMaterial({ color: 0xffffff });
+    const headParts = [new THREE.SphereGeometry(1, 6, 4)];
+    const nose = new THREE.SphereGeometry(0.22, 4, 2); nose.scale(0.7, 0.85, 1.2); nose.translate(0, -0.03, 0.94); headParts.push(nose);
+    for (const side of [-1, 1]) { const ear = new THREE.SphereGeometry(0.17, 4, 2); ear.scale(0.5, 1.3, 0.75); ear.translate(side * 0.96, 0, 0); headParts.push(ear); }
     const headGeo = mergeGeometries(headParts);
-    const shirtParts = [new THREE.CylinderGeometry(0.19, 0.16, 0.43, 7)];
+    const shirtParts = [new THREE.CylinderGeometry(0.19, 0.16, 0.43, 6)];
     for (const side of [-1, 1]) {
-      const sleeve = new THREE.CylinderGeometry(0.075, 0.07, 0.27, 6); sleeve.rotateZ(side * 0.22); sleeve.translate(side * 0.21, 0.015, 0.025); shirtParts.push(sleeve);
-      const thigh = new THREE.CylinderGeometry(0.092, 0.1, 0.34, 6); thigh.rotateX(Math.PI / 2); thigh.translate(side * 0.105, -0.19, 0.2); shirtParts.push(thigh);
+      const sleeve = new THREE.CylinderGeometry(0.075, 0.07, 0.27, 4); sleeve.rotateZ(side * 0.22); sleeve.translate(side * 0.21, 0.015, 0.025); shirtParts.push(sleeve);
+      const thigh = new THREE.CylinderGeometry(0.092, 0.1, 0.34, 4); thigh.rotateX(Math.PI / 2); thigh.translate(side * 0.105, -0.19, 0.2); shirtParts.push(thigh);
     }
     const bodyGeo = mergeGeometries(shirtParts), limbParts = [];
     for (const side of [-1, 1]) {
-      const arm = new THREE.CylinderGeometry(0.05, 0.038, 0.27, 6); arm.rotateX(-1.05); arm.translate(side * 0.23, -0.17, 0.14); limbParts.push(arm);
-      const hand = new THREE.SphereGeometry(0.048, 5, 4); hand.scale(0.8, 0.65, 1.25); hand.translate(side * 0.23, -0.23, 0.26); limbParts.push(hand);
-      const leg = new THREE.CylinderGeometry(0.064, 0.045, 0.36, 6); leg.translate(side * 0.105, -0.4, 0.33); limbParts.push(leg);
+      const arm = new THREE.CylinderGeometry(0.05, 0.038, 0.27, 4); arm.rotateX(-1.05); arm.translate(side * 0.23, -0.17, 0.14); limbParts.push(arm);
+      const hand = new THREE.SphereGeometry(0.048, 4, 3); hand.scale(0.8, 0.65, 1.25); hand.translate(side * 0.23, -0.23, 0.26); limbParts.push(hand);
+      const leg = new THREE.CylinderGeometry(0.064, 0.045, 0.36, 4); leg.translate(side * 0.105, -0.4, 0.33); limbParts.push(leg);
     }
-    const limbs = new THREE.InstancedMesh(mergeGeometries(limbParts), material(0xffffff), occupied.length);
-    const hair = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 8, 5, 0, Math.PI * 2, 0, Math.PI * 0.49), material(0xffffff), occupied.length);
-    const heads = new THREE.InstancedMesh(headGeo, material(0xffffff, { roughness: 0.7 }), occupied.length);
-    const bodies = new THREE.InstancedMesh(bodyGeo, material(0xffffff), occupied.length);
+    const limbs = new THREE.InstancedMesh(mergeGeometries(limbParts), crowdMaterial(), occupied.length);
+    const hair = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 6, 3, 0, Math.PI * 2, 0, Math.PI * 0.49), crowdMaterial(), occupied.length);
+    const heads = new THREE.InstancedMesh(headGeo, crowdMaterial(), occupied.length);
+    const bodies = new THREE.InstancedMesh(bodyGeo, crowdMaterial(), occupied.length);
     locations.forEach((p, i) => { q.setFromAxisAngle(V(0, 1, 0), p.yaw); matrix.compose(V(p.x, p.y, p.z), q, V(1, 1, 1)); seats.setMatrixAt(i, matrix); seats.setColorAt(i, color.setHex(i % 13 === 0 ? 0x735344 : i % 3 ? 0x243d50 : 0x1b2f40)); });
     occupied.forEach((p, i) => {
       q.setFromAxisAngle(V(0, 1, 0), p.yaw);
@@ -143,6 +146,7 @@ export class Arena {
     }
     for (let i = 0; i < 6; i++) {
       const h = new Humanoid({ team: i % 2 ? 'home' : 'away', headgear: 'bare', seed: i * 11, scale: 1.01 + i % 3 * 0.02 }); h.setLod(1); h.setNumber(0);
+      h.material.envMap = this.environment; h.material.envMapIntensity = 0.38;
       h.root.position.set(i % 2 ? -9.8 : 9.8, 0, -2 + Math.floor(i / 2) * 5); h.root.rotation.y = i % 2 ? Math.PI / 2 : -Math.PI / 2;
       scene.add(h.root); applyClip(h, i % 2 ? 'idle' : 'idle_fold_arms', i * 0.4); h.update(); this.spectators.push(h);
     }

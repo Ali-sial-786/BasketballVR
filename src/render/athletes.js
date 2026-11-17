@@ -97,10 +97,10 @@ export class PlayerView {
 }
 
 export class HandsView {
-  constructor(scene) {
+  constructor(scene, environment = null) {
     this.hands = {};
     for (const [name, side] of [['left', 'L'], ['right', 'R']]) {
-      const mat = new THREE.MeshPhysicalMaterial({ color: 0xc48b66, roughness: 0.62, metalness: 0, clearcoat: 0.03 });
+      const mat = new THREE.MeshPhysicalMaterial({ color: 0xc48b66, roughness: 0.62, metalness: 0, clearcoat: 0.03, envMap: environment, envMapIntensity: 0.38 });
       const group = new THREE.Group(), hand = new THREE.Mesh(handGeometry(side), mat);
       hand.castShadow = true; group.add(hand); scene.add(group); this.hands[name] = group;
       const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.037, 0.032, 16), material(0x2a7066)); cuff.rotation.x = Math.PI / 2; cuff.position.z = 0.018; group.add(cuff);

@@ -74,6 +74,7 @@ Use controller straps and a clear boundary. You can stay physically in one place
 - Human-proportioned, smooth-skinned athletes, full anatomical hands/fingers, faces, modeled hair and footwear, sleeveless jerseys and shorts. Approximately **56k triangles** close up; a separate **9k** distant mesh is included. Four player heights, skin tones and kit numbers, plus detailed sideline spectators and an instanced seated crowd. Skin and fabric have distinct physically based shading.
 - The supplied **Mixamo `Dribble _2_.fbx`** is retargeted onto the 17-bone athlete rig. Its 2.1-second take supplies the dribbling weight shift and arm motion; inverse kinematics fits the hands to the live ball. Walking, running and defense blend from Crease VR’s retargeted Quaternius clips.
 - The Fieldhouse indoor arena: full hardwood venue, both baskets, tiered seating, steel roof trusses, arena lights, LED ribbons, live four-face jumbotron and a physical courtside scoreboard. Only the near half-court is active for pickup games. A deforming net, ball backspin, restrained trails, haptics and original synthesized sounds with room reflections complete the presentation.
+- Instanced crowd geometry and matte background shading keep the arena efficient. Room reflections are applied to the hardwood and detailed athletes; broad overhead key/fill lights illuminate the venue.
 
 ## Gameplay recordings and references
 
