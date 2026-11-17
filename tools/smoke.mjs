@@ -97,7 +97,26 @@ try {
   assert(await mobile.locator('#touch-stick').isVisible()); assert(await mobile.locator('[data-action="shoot"]').isVisible());
   await mobile.locator('[data-action="cross"]').tap(); await until(mobile, () => window.__rimrun.engine.stats.moves === 1);
   await screenshot(mobile, `${output}/mobile-game.png`);
-  console.log('Touch: responsive menu, start, movement pad, action controls and crossover passed.');
+  await until(mobile, () => window.__rimrun.engine.human.moveCooldown === 0);
+  await mobile.locator('[data-action="spin"]').tap();
+  await until(mobile, () => window.__rimrun.engine.human.moveState?.kind === 'spin');
+  const touch = await mobile.context().newCDPSession(mobile);
+  async function holdButton(action) {
+    const box = await mobile.locator(`[data-action="${action}"]`).boundingBox();
+    assert(box, `Touch action must be visible: ${action}`);
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }] });
+  }
+  await holdButton('shoot'); await until(mobile, () => window.__rimrun.engine.charge > 0.1);
+  await touch.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
+  await until(mobile, () => window.__rimrun.engine.ballState === 'dribble');
+  assert.equal(await mobile.evaluate(() => window.__rimrun.engine.stats.attempts), 0);
+  await mobile.locator('#pause').tap(); await mobile.locator('#leave-game').tap();
+  await mobile.locator('[data-mode="1v1"]').tap(); await mobile.locator('#play').tap();
+  await until(mobile, () => window.__rimrun.engine.owner?.team === 1 && !document.querySelector('[data-action="defend"]').hidden, null, 900);
+  await holdButton('defend'); await until(mobile, () => window.__rimrun.engine.human.defending);
+  await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await until(mobile, () => !window.__rimrun.engine.human.defending);
+  console.log('Touch: responsive menu, crossover, spin, cancelled gathers and held defensive stance passed.');
   assert.deepEqual(errors, [], `Browser errors: ${errors.join('\n')}`);
   console.log(`No browser errors. Screenshots saved to ${output}/. Physical headset validation remains manual.`);
 } finally { await browser?.close(); server?.kill(); }

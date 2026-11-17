@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { greenWindow } from '../physics/basketball.js';
 import { CONFIG, MODES } from '../config.js';
 
 export class XRUI {
@@ -26,7 +27,7 @@ export class XRUI {
     const c = this.menuCanvas.getContext('2d'), e = this.engine; c.clearRect(0, 0, 1000, 1120);
     c.fillStyle = '#193e3bf5'; c.beginPath(); c.roundRect(0, 0, 1000, 1120, 40); c.fill();
     c.strokeStyle = '#e9dcb855'; c.lineWidth = 2; c.stroke();
-    c.textAlign = 'left'; c.fillStyle = '#d2c5a7'; c.font = 'bold 22px Arial'; c.fillText('R I M R U N  /  S U N S E T  P A R K', 65, 70);
+    c.textAlign = 'left'; c.fillStyle = '#d2c5a7'; c.font = 'bold 22px Arial'; c.fillText('R I M R U N  /  T H E  F I E L D H O U S E', 65, 70);
     c.fillStyle = '#f6e9cd'; c.font = 'italic 900 86px Arial'; c.fillText(e.phase === 'result' ? 'RUN IT BACK.' : e.phase === 'paused' ? 'TAKE A BREATHER.' : 'OWN THE COURT.', 60, 180, 880);
     c.fillStyle = '#ffd09a'; c.font = 'bold 27px Arial';
     c.fillText(e.phase === 'result' ? `FINAL  ${e.score[0]} — ${e.score[1]}   /   ${e.stats.made}/${e.stats.attempts} SHOOTING` : 'PICK YOUR RUN. POINT & PULL A TRIGGER.', 65, 237);
@@ -87,8 +88,9 @@ export class XRUI {
     c.fillText(now < this.messageUntil ? this.message : e.needsClear && e.possession === 0 ? 'CLEAR IT BEYOND THE ARC' : e.ownerId === 0 ? 'YOUR BALL · GRIP TO GATHER · LIFT & RELEASE' : 'GET OPEN · HANDS UP · STAY IN FRONT', 512, 120, 950);
     if (e.ownerId === 0 && e.ballState === 'held') {
       c.fillStyle = '#547364'; c.fillRect(195, 156, 634, 26);
-      c.fillStyle = '#addc9d'; c.fillRect(195 + 634 * (0.645 / 1.35), 156, 634 * (0.15 / 1.35), 26);
-      c.fillStyle = '#fff3da'; c.fillRect(195 + 634 * e.charge / 1.35, 153, 6, 32);
+      const window = greenWindow(e.difficulty, e.heatTime > 0);
+      c.fillStyle = '#addc9d'; c.fillRect(195 + 634 * (CONFIG.shot.idealTime - window) / CONFIG.shot.maxCharge, 156, 634 * 2 * window / CONFIG.shot.maxCharge, 26);
+      c.fillStyle = '#fff3da'; c.fillRect(195 + 634 * e.charge / CONFIG.shot.maxCharge, 153, 6, 32);
     }
     c.fillStyle = '#f3d5a8'; c.font = '22px Arial'; c.fillText(`STAMINA ${Math.round(e.human.stamina)}     ${e.heatTime > 0 ? 'ON FIRE!' : `HEAT ${e.heat}/5`}     ·     STICK CLICK: MENU`, 512, 240);
     this.hudTexture.needsUpdate = true;

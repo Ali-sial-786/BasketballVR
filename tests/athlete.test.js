@@ -69,3 +69,18 @@ test('eyes align with their sockets, shoe surfaces face out, and concealed feet 
   const top = vertices('Details_Shoe').filter(p => p.z > 0.13 && p.y > 0.07 && p.y < 0.13);
   assert(top.length > 10); assert(top.reduce((sum, p) => sum + p.ny, 0) / top.length > 0.15);
 });
+
+test('first-person arms keep their skinning and restore the complete model when spectating', () => {
+  const h = new Humanoid({ headgear: 'bare' }), full = h.mesh.geometry, skeleton = h.mesh.skeleton;
+  h.setArmsOnly(true);
+  assert(h.mesh.geometry.index.count > 1000); assert(h.mesh.geometry.index.count < full.index.count / 2);
+  const ids = [...new Set(h.mesh.geometry.index.array)];
+  const boneNames = ids.map(id => {
+    const { skinIndex, skinWeight } = h.mesh.geometry.attributes;
+    let top = 0;
+    for (let i = 1; i < 4; i++) if (skinWeight.getComponent(id, i) > skinWeight.getComponent(id, top)) top = i;
+    return h.boneList[skinIndex.getComponent(id, top)].name;
+  });
+  assert(boneNames.includes('handL') && boneNames.includes('handR')); assert(!boneNames.includes('head'));
+  h.setArmsOnly(false); assert.equal(h.mesh.geometry, full); assert.equal(h.mesh.skeleton, skeleton);
+});

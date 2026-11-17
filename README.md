@@ -29,7 +29,7 @@ The smoke runner uses `/usr/bin/chromium` by default. Set `CHROMIUM_PATH` for an
 | **3PT / Make It Rain** | Five racks, five balls each, 70 seconds. Last ball of every rack is worth 2; the entire middle rack is worth 2. Maximum **34**. A release before the buzzer counts. Personal best is saved on this device. |
 | **Shootaround** | No opponent or time limit. Automatic ball return, release feedback, handles and close-range layups and jump dunks. |
 
-After a basket, the other team checks the ball. After a defensive rebound or steal, the new offense must **clear beyond the three-point line**. Passes travel through the world and can be intercepted. Blocks, rebounds, rim bounces and the backboard use the actual ball position. Offline AI play is implemented; network multiplayer is not included.
+After a basket, the other team checks the ball. After a defensive rebound or steal, the new offense must **clear beyond the three-point line**. Passes lead moving teammates. Receivers can run onto the pass and defenders can intercept it. The shot clock runs during passes and loose balls. Blocks, rebounds, rim bounces and the backboard use the actual ball position. Offline AI play is implemented; network multiplayer is not included.
 
 ## Desktop and touch
 
@@ -44,7 +44,7 @@ After a basket, the other team checks the ball. After a defensive rebound or ste
 | **X** | Pass to Jax, or call for the ball when he has it. |
 | **Esc / M** | Pause, restart or choose another run. |
 
-Touch screens have a movement pad and contextual action buttons. Drag the court to look. Hold/release **Shoot** for the same timing mechanic.
+On touch screens, drag the pad to move and drag the court to look. Hold **Shoot** and release on green. All four dribble moves are available while you have the ball. In 2v2, **Pass** changes to **Call** when Jax has possession. On defense, hold **Guard** to slide or tap **Steal** or **Jump**. The contest keeps you at the active rack.
 
 ## Quest controllers
 
@@ -70,6 +70,8 @@ Use controller straps and a clear boundary. You can stay physically in one place
 
 - Three difficulty levels adjust shooting assistance, release windows and AI. Real aiming, timing, pressure and shot form still matter.
 - Movement accelerates and brakes smoothly. Crossovers, wraps, spins and stepbacks have timed travel, low ball transfers and stamina costs. Feet plant during cuts and defensive slides; moves briefly protect the ball. Poorly timed defensive reaches leave the defender vulnerable; move chains can stagger them.
+- First-person desktop and touch use the athlete’s skinned arms. The hands switch at crossover floor contact, bring catches into the shooting pocket, and separate at release. Quest uses the tracked controller hands.
+- Drive to the lip of the rim, gather, and release above it for a downward dunk. A finish from farther out uses a layup arc. Defenders apply the most pressure from between the shooter and the basket.
 - Five heat points trigger a 14-second hot streak with a wider release window. Perfect makes build heat faster.
 - Human-proportioned, smooth-skinned athletes, full anatomical hands/fingers, faces, modeled hair and footwear, sleeveless jerseys and shorts. Approximately **56k triangles** close up; a separate **9k** distant mesh is included. Four player heights, skin tones and kit numbers, plus detailed sideline spectators and an instanced seated crowd. Skin and fabric have distinct physically based shading.
 - The supplied **Mixamo `Dribble _2_.fbx`** is retargeted onto the 17-bone athlete rig. Its 2.1-second take supplies the dribbling weight shift and arm motion; inverse kinematics fits the hands to the live ball. Walking, running and defense blend from Crease VR’s retargeted Quaternius clips.

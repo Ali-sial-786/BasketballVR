@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { dribbleHand } from '../game/movement.js';
 import { Controller } from './controller.js';
 import { Vec3, Quat, Pose } from '../physics/math.js';
 
@@ -11,7 +12,7 @@ export class Input {
     this.left = new Controller('left'); this.right = new Controller('right');
     this.head = new Pose(); this.headRef = new Pose(); this.keys = new Set(); this.actions = [];
     this.yaw = Math.PI; this.pitch = -0.02; this.enabled = false; this.mouseHeld = false;
-    this.touchMove = { x: 0, z: 0 }; this.touchShoot = false; this.lastTime = 0; this.snapArmed = true;
+    this.touchMove = { x: 0, z: 0 }; this.touchShoot = false; this.touchGuard = false; this.lastTime = 0; this.snapArmed = true;
     this.moveArmed = true; this.gestureTime = -10; this.physicalGather = null; this.suppressRelease = false;
     this.onPause = () => {}; this.onLook = () => {};
     window.addEventListener('keydown', e => {
@@ -53,7 +54,7 @@ export class Input {
   get xr() { return this.renderer.xr.isPresenting; }
   push(key, value) { this.actions.push({ key, value }); }
   clear() {
-    this.keys.clear(); this.actions = []; this.mouseHeld = false; this.touchShoot = false; this.touchMove = { x: 0, z: 0 };
+    this.keys.clear(); this.actions = []; this.mouseHeld = false; this.touchShoot = false; this.touchGuard = false; this.touchMove = { x: 0, z: 0 };
     this.physicalGather = null; this.suppressRelease = true; this.left.reset(); this.right.reset();
   }
   unlock() { this.intentionalUnlock = true; document.exitPointerLock?.(); }
@@ -66,9 +67,11 @@ export class Input {
       this.head.p.copy(worldP); this.head.q.copy(worldQ); return;
     }
     const session = this.renderer.xr.getSession(), ref = this.renderer.xr.getReferenceSpace();
-    if (!ref || !frame) return;
-    const viewer = frame.getViewerPose(ref);
-    if (!viewer) { this.left.reset(); this.right.reset(); return; }
+    const viewer = ref && frame ? frame.getViewerPose(ref) : null;
+    if (!viewer) {
+      for (const c of [this.left, this.right]) { c.tracked = false; c.reset(); }
+      return;
+    }
     this.viewerTracked = true;
     copyPose(this.headRef, viewer); this.rig.getWorldQuaternion(worldQ);
     const rq = new Quat().copy(worldQ);
@@ -82,9 +85,13 @@ export class Input {
       c.gripPose.q.copy(rq).multiply(c.gripRef.q);
       const ray = frame.getPose(source.targetRaySpace, ref);
       if (ray) { copyPose(c.rayPose, ray); c.rayPose.p.applyQuat(rq).add(this.rig.position); c.rayPose.q.copy(rq).multiply(new Quat().copy(ray.transform.orientation)); }
+      const reacquired = c.previousTime < 0;
       c.record(t, rq, pose.linearVelocity || null);
       const gp = source.gamepad, b = gp?.buttons || [], axes = gp?.axes || [];
-      for (const [name, i] of Object.entries({ trigger: 0, squeeze: 1, stick: 3, a: 4, b: 5 })) c.buttons[name].set(b[i]?.pressed || b[i]?.value > 0.55, b[i]?.value || 0);
+      for (const [name, i] of Object.entries({ trigger: 0, squeeze: 1, stick: 3, a: 4, b: 5 })) {
+        const button = c.buttons[name]; button.set(b[i]?.pressed || b[i]?.value > 0.55, b[i]?.value || 0);
+        if (reacquired) button.down = button.up = false;
+      }
       c.stick.x = axes.length >= 4 ? axes[2] : axes[0] || 0; c.stick.y = axes.length >= 4 ? axes[3] : axes[1] || 0;
     }
     this.refreshWorld();
@@ -106,7 +113,7 @@ export class Input {
       const r = Number(this.keys.has('KeyD') || this.keys.has('ArrowRight')) - Number(this.keys.has('KeyA') || this.keys.has('ArrowLeft')) + this.touchMove.x;
       cmd.move.addScaled(forward, f).addScaled(right, r);
       cmd.aim.copy(forward); cmd.aim.y = Math.sin(this.pitch);
-      cmd.defend = this.keys.has('ControlLeft') || this.keys.has('ControlRight');
+      cmd.defend = this.touchGuard || this.keys.has('ControlLeft') || this.keys.has('ControlRight');
       cmd.sprint = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
       cmd.autoJump = true;
       // Holding through the check-ball cue gathers as soon as play is live.
@@ -146,13 +153,28 @@ export class Input {
       for (const c of [main, off]) if (c.tracked) cmd.hands.push(c.gripPose.p.clone());
       if (engine.ownerId === 0) {
         let c = this.physicalGather ? this[this.physicalGather] : main;
-        if (!c.tracked) { this.physicalGather = null; this.suppressRelease = true; }
+        if (!c.tracked) { cmd.cancelGather = engine.ballState === 'held'; this.physicalGather = null; this.suppressRelease = true; }
         const candidate = [main, off].find(h => h.tracked && h.buttons.squeeze.down);
-        if (candidate) { this.physicalGather = candidate.hand; c = candidate; cmd.gather = true; this.suppressRelease = false; }
+        if (candidate) { cmd.cancelGather = false; this.physicalGather = candidate.hand; c = candidate; cmd.gather = true; this.suppressRelease = false; }
         if (main.tracked && main.buttons.trigger.down) { cmd.gather = true; this.suppressRelease = false; }
         if (c.tracked) {
           cmd.hand = c.gripPose.p.clone().add(new Vec3(0, 0.03, -0.06).applyQuat(c.gripPose.q));
-          cmd.bounceSpeed = Math.max(0, -c.linVel.y - 0.8);
+          if (!cmd.gather && !this.physicalGather && engine.ballState === 'dribble') {
+            const p = engine.human;
+            const ballHand = this[dribbleHand(p) > 0 ? 'right' : 'left'];
+            if (ballHand.tracked) {
+              cmd.hand = ballHand.gripPose.p.clone();
+              cmd.bounceSpeed = Math.max(0, -ballHand.linVel.y - 0.8);
+            }
+            const m = p.moveState;
+            if (m && (m.kind === 'cross' || m.kind === 'behind') && this.left.tracked && this.right.tracked) {
+              const u = Math.min(1, m.age / m.duration);
+              const from = m.fromSide > 0 ? this.right : this.left;
+              const to = m.toSide > 0 ? this.right : this.left;
+              cmd.hand.lerpVectors(from.gripPose.p, to.gripPose.p, u * u * (3 - 2 * u));
+              cmd.hand.addScaled(headForward, Math.sin(Math.PI * u) * (m.kind === 'behind' ? -0.57 : 0.12));
+            }
+          }
           if ((c.buttons.squeeze.up && this.physicalGather === c.hand) && !this.suppressRelease) {
             const v = c.releaseVelocity(this.lastTime);
             const forwardSpeed = v.dot(headForward);
@@ -160,13 +182,14 @@ export class Input {
             cmd.release = { kind, velocity: v, position: cmd.hand.clone() }; this.physicalGather = null;
           }
         }
-        if (main.tracked && main.buttons.trigger.up && !this.physicalGather && !this.suppressRelease) cmd.release = {};
+        if (!cmd.release && main.tracked && main.buttons.trigger.up && !this.physicalGather && !this.suppressRelease) cmd.release = {};
         // Low, lateral hand sweeps read as a crossover; a hand behind the hip
         // reads as a wrap. They share the same stamina/cooldown as buttons.
-        if (!this.physicalGather && main.tracked && engine.ballState === 'dribble' && this.lastTime - this.gestureTime > 0.6) {
-          const local = main.gripPose.p.clone().sub(this.head.p);
-          const lateral = local.dot(right), across = main.linVel.dot(right);
-          if (main.gripPose.p.y < this.head.p.y - 0.3 && Math.abs(across) > 1.15 && lateral * across < -0.04) {
+        const dribbler = this[dribbleHand(engine.human) > 0 ? 'right' : 'left'];
+        if (!this.physicalGather && dribbler.tracked && engine.ballState === 'dribble' && this.lastTime - this.gestureTime > 0.6) {
+          const local = dribbler.gripPose.p.clone().sub(this.head.p);
+          const lateral = local.dot(right), across = dribbler.linVel.dot(right);
+          if (dribbler.gripPose.p.y < this.head.p.y - 0.3 && Math.abs(across) > 1.15 && lateral * across < -0.04) {
             cmd.moveAction = local.dot(headForward) < -0.08 ? 'behind' : 'cross'; this.gestureTime = this.lastTime;
           }
         }
@@ -178,29 +201,43 @@ export class Input {
   setupTouch() {
     const zone = document.getElementById('touch-stick'), nub = zone?.querySelector('span');
     let touchId = null, start = null;
-    zone?.addEventListener('pointerdown', e => { e.preventDefault(); touchId = e.pointerId; start = { x: e.clientX, y: e.clientY }; zone.setPointerCapture(e.pointerId); });
+    zone?.addEventListener('pointerdown', e => { if (!this.enabled || touchId !== null) return; e.preventDefault(); touchId = e.pointerId; start = { x: e.clientX, y: e.clientY }; zone.setPointerCapture(e.pointerId); });
     zone?.addEventListener('pointermove', e => {
       if (e.pointerId !== touchId) return; const dx = (e.clientX - start.x) / 45, dy = (e.clientY - start.y) / 45;
       const l = Math.max(1, Math.hypot(dx, dy)); this.touchMove = { x: dx / l, z: dy / l };
       nub.style.transform = `translate(${dx / l * 30}px,${dy / l * 30}px)`;
     });
-    const reset = () => { touchId = null; this.touchMove = { x: 0, z: 0 }; if (nub) nub.style.transform = ''; };
+    const reset = e => { if (e.pointerId !== touchId) return; touchId = null; this.touchMove = { x: 0, z: 0 }; if (nub) nub.style.transform = ''; };
     zone?.addEventListener('pointerup', reset); zone?.addEventListener('pointercancel', reset);
     for (const button of document.querySelectorAll('[data-action]')) {
+      let pointer = null;
       button.addEventListener('pointerdown', e => {
-        e.preventDefault(); if (!this.enabled) return; button.setPointerCapture(e.pointerId);
+        e.preventDefault(); if (!this.enabled || pointer !== null) return; pointer = e.pointerId; button.setPointerCapture(pointer);
         const action = button.dataset.action;
         if (action === 'shoot') { this.touchShoot = true; this.push('gather', true); }
+        else if (action === 'defend') this.touchGuard = true;
         else if (['cross', 'behind', 'spin', 'stepback'].includes(action)) this.push('moveAction', action);
         else this.push(action, true);
       });
-      const release = e => { if (button.dataset.action === 'shoot' && this.touchShoot) { e.preventDefault(); this.touchShoot = false; if (this.enabled) this.push('release', {}); } };
-      button.addEventListener('pointerup', release); button.addEventListener('pointercancel', () => { this.touchShoot = false; });
+      const release = e => {
+        if (e.pointerId !== pointer) return;
+        pointer = null;
+        if (button.dataset.action === 'defend') this.touchGuard = false;
+        if (button.dataset.action === 'shoot' && this.touchShoot) {
+          this.touchShoot = false;
+          if (this.enabled) {
+            if (e.type === 'pointerup') this.push('release', {});
+            else this.push('cancelGather', true);
+          }
+        }
+      };
+      for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) button.addEventListener(type, release);
     }
     // Drag the empty right half to look; the action buttons keep their own capture.
     let look = null;
     this.canvas.addEventListener('pointerdown', e => { if (e.pointerType === 'touch' && this.enabled) { look = { id: e.pointerId, x: e.clientX, y: e.clientY }; this.canvas.setPointerCapture(e.pointerId); } });
     this.canvas.addEventListener('pointermove', e => { if (look?.id !== e.pointerId) return; this.yaw -= (e.clientX - look.x) * 0.006; this.pitch = Math.max(-0.8, Math.min(0.6, this.pitch - (e.clientY - look.y) * 0.004)); look.x = e.clientX; look.y = e.clientY; });
-    this.canvas.addEventListener('pointerup', () => { look = null; });
+    const endLook = e => { if (look?.id === e.pointerId) look = null; };
+    this.canvas.addEventListener('pointerup', endLook); this.canvas.addEventListener('pointercancel', endLook);
   }
 }

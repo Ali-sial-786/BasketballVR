@@ -1,4 +1,4 @@
-import { Vec3, clamp } from '../physics/math.js';
+import { Vec3, clamp, smoothstep } from '../physics/math.js';
 import { CONFIG, DIFFICULTIES, MODES, RACKS } from '../config.js';
 import { Basketball, makeShot, isThree } from '../physics/basketball.js';
 import { movePlayer, beginMove, advanceMove, dribbleOffset, MOVE_SPECS } from './movement.js';
@@ -35,7 +35,7 @@ export class GameEngine {
     if (mode === '2v2') this.players.push(athlete(3, 1, 'ACE', 3.4, -2.2));
     this.score = [0, 0]; this.possession = 0; this.needsClear = false;
     this.shotClock = CONFIG.match.shotClock; this.ownerId = 0; this.ballState = 'dribble'; this.possessionPasses = 0;
-    this.shot = null; this.lastShot = null; this.passInfo = null; this.lastPass = null;
+    this.shot = null; this.lastShot = null; this.passInfo = null; this.lastPass = null; this.catchFrom = null;
     this.charge = 0; this.heat = 0; this.heatTime = 0; this.combo = []; this.comboUntil = 0;
     this.checkTimer = 1.1; this.checkTeam = 0; this.settleTimer = 0;
     this.contestTime = CONFIG.contest.seconds; this.rack = 0; this.rackBall = 0;
@@ -72,19 +72,19 @@ export class GameEngine {
       if (this.checkTimer <= 0) { this.checkTimer = 0; this.resetPossession(this.checkTeam); }
       return;
     }
+    if (this.mode === 'contest') {
+      this.contestTime = Math.max(0, this.contestTime - dt);
+      if (!this.contestTime && !this.contestBuzzer) {
+        this.contestBuzzer = true; this.emit('buzzer');
+        if (this.ballState !== 'flight' || this.shot?.resolved) { this.finish(); return; }
+        this.toast('AT THE BUZZER!', 'This one still counts.');
+      }
+    }
     if (this.settleTimer > 0) {
       this.settleTimer -= dt;
       this.ball.step(dt);
       if (this.settleTimer <= 0) { this.settleTimer = 0; this.afterContestShot(); }
       return;
-    }
-    if (this.mode === 'contest') {
-      this.contestTime = Math.max(0, this.contestTime - dt);
-      if (!this.contestTime && !this.contestBuzzer) {
-        this.contestBuzzer = true; this.emit('buzzer');
-        if (this.ballState !== 'flight') { this.finish(); return; }
-        this.toast('AT THE BUZZER!', 'This one still counts.');
-      }
     }
     if (!this.preview) this.humanInput(dt, cmd);
     this.updateAI(dt);
@@ -93,8 +93,8 @@ export class GameEngine {
     if (this.needsClear && this.owner && isThree(this.owner.pos)) {
       this.needsClear = false; this.toast('CLEARED.', 'Go get a bucket.');
     }
-    if (this.isMatch && (this.ballState === 'dribble' || this.ballState === 'held')) {
-      this.shotClock -= dt;
+    if (this.isMatch && this.ballState !== 'flight') {
+      this.shotClock = Math.max(0, this.shotClock - dt);
       if (this.shotClock <= 0) { this.turnover('SHOT CLOCK.', 'Get your shot off before 18.'); return; }
     }
     if (this.owner) this.updateOwnedBall(dt);
@@ -123,16 +123,28 @@ export class GameEngine {
       else if (this.owner?.team === 0) this.pass(this.owner, p);
     }
     if (this.ownerId !== 0) { this.charge = 0; return; }
-    if (cmd.gather && this.ballState === 'dribble') { this.ballState = 'held'; this.charge = 0; }
+    if (cmd.cancelGather) {
+      this.ballState = 'dribble'; this.charge = 0; p.gatherFrom = null;
+      return;
+    }
+    if (cmd.gather && this.ballState === 'dribble') { this.beginGather(p); this.ballState = 'held'; this.charge = 0; }
     if (this.ballState === 'held') this.charge = Math.min(CONFIG.shot.maxCharge, this.charge + dt);
-    if (cmd.autoJump && this.ballState === 'held' && this.charge >= 0.49 && this.charge < 0.49 + dt * 1.5) this.jump(p);
-    if (cmd.release) {
+    const takeoffTime = distance(p.pos, CONFIG.hoop) < 0.85 ? 0.41 : 0.49;
+    if (cmd.autoJump && this.ballState === 'held' && this.charge >= takeoffTime && this.charge < takeoffTime + dt * 1.5) this.jump(p);
+    if (cmd.release && this.ballState === 'held') {
       if (cmd.release.kind === 'bounce') {
         this.ballState = 'dribble'; this.charge = 0; this.dribbleImpulse = 2; this.emit('bounce', { speed: 4 });
       } else if (cmd.release.kind === 'pass' && this.mode === '2v2') this.pass(p);
       else this.shoot(p, { aim: cmd.aim || new Vec3(0, 0, -1), physicalVelocity: cmd.release.velocity || null,
         from: cmd.release.position || null });
     }
+  }
+
+  beginGather(p) {
+    p.gatherFrom = this.ball.pos.clone().sub(p.pos);
+    p.gatherFrom.y -= p.jump;
+    p.moveState = null;
+    this.catchFrom = null;
   }
 
   updateOwnedBall(dt) {
@@ -146,15 +158,40 @@ export class GameEngine {
     const right = new Vec3(-Math.cos(p.yaw), 0, Math.sin(p.yaw));
     const offset = dribbleOffset(p);
     const charge = p.id === 0 && !this.preview ? this.charge : p.charge;
-    this.ball.pos.copy(p.pos).addScaled(forward, gathered ? 0.48 : offset.z).addScaled(right, gathered ? p.side * 0.08 : offset.x);
+    this.ball.pos.copy(p.pos).addScaled(forward, gathered ? 0.48 : offset.z).addScaled(right, gathered ? p.side * 0.19 : offset.x);
     this.ball.pos.y = p.jump + (gathered ? 1.31 + Math.min(0.7, charge * 0.96) : offset.y);
+    if (gathered && p.jump > 0 && !(p.id === 0 && this.hand)) {
+      const hoop = CONFIG.hoop, gap = distance(p.pos, hoop);
+      const facing = ((hoop.x - p.pos.x) * forward.x + (hoop.z - p.pos.z) * forward.z) / Math.max(gap, 0.01);
+      const extension = (1 - smoothstep(0.42, 0.85, gap)) * smoothstep(0.16, 0.48, p.jump) * smoothstep(0.3, 0.8, facing);
+      if (extension > 0) {
+        const rimTarget = new Vec3(hoop.x - forward.x * 0.035, p.jump + 2.18, hoop.z - forward.z * 0.035);
+        this.ball.pos.lerp(rimTarget, extension);
+      }
+    }
+    if (gathered && p.gatherFrom) {
+      const t = clamp(charge / 0.22, 0, 1);
+      const from = p.pos.clone().add(p.gatherFrom); from.y += p.jump;
+      this.ball.pos.lerpVectors(from, this.ball.pos, t * t * (3 - 2 * t));
+    }
     if (p.id === 0 && this.hand && gathered) this.ball.pos.copy(this.hand);
     else if (p.id === 0 && this.hand && !gathered) {
       // Stay below the actual hand; never draw a bouncing ball through the face.
       this.ball.pos.x = this.hand.x; this.ball.pos.z = this.hand.z;
-      if (this.manualDribble) this.ball.pos.y = 0.13 + Math.abs(Math.sin(p.dribble)) * clamp(this.hand.y - 0.12, 0.35, 1.15);
+      if (this.manualDribble && !p.moveState) this.ball.pos.y = 0.13 + Math.abs(Math.sin(p.dribble)) * clamp(this.hand.y - 0.12, 0.35, 1.15);
     }
-    if (!gathered && Math.floor(p.dribble / Math.PI) !== oldPhase) this.emit('bounce', { speed: 3, owner: p.id });
+    if (this.catchFrom && p.id === 0 && this.hand) this.catchFrom = null;
+    if (this.catchFrom) {
+      const t = clamp(p.ownedFor / 0.22, 0, 1);
+      const from = p.pos.clone().add(this.catchFrom); from.y = Math.max(CONFIG.ball.radius, from.y + p.jump);
+      this.ball.pos.lerpVectors(from, this.ball.pos, t * t * (3 - 2 * t));
+      if (t >= 1) this.catchFrom = null;
+    }
+    const move = p.moveState;
+    const transfer = move && (move.kind === 'cross' || move.kind === 'behind');
+    const bounced = transfer ? move.age >= move.duration / 2 && move.age - dt < move.duration / 2
+      : move?.kind !== 'spin' && Math.floor(p.dribble / Math.PI) !== oldPhase;
+    if (dt && !gathered && !this.catchFrom && bounced) this.emit('bounce', { speed: 3, owner: p.id });
     this.ball.vel.set(0, 0, 0);
   }
 
@@ -164,15 +201,18 @@ export class GameEngine {
     const hoop = CONFIG.hoop;
     aim ||= new Vec3(hoop.x - p.pos.x, 0, hoop.z - p.pos.z).normalize();
     const origin = from ? new Vec3().copy(from) : this.ball.pos.clone();
-    if (!from) origin.y = Math.max(origin.y, 1.95 + p.jump);
-    // A legitimate close jump becomes an accessible one-handed dunk.
-    const dunk = distance(p.pos, hoop) < 1.65 && p.jump > 0.23;
+    if (!from && this.ballState !== 'held' && p.action !== 'shooting') origin.y = Math.max(origin.y, 1.95 + p.jump);
+    const dunk = distance(p.pos, hoop) < 1.1 && distance(origin, hoop) < 0.18 && origin.y > hoop.y + 0.08;
     const layup = !dunk && distance(p.pos, hoop) < 2.65 && (p.jump > 0.08 || p.vel.length() > 1.2);
-    if (dunk) origin.y = Math.max(3.35, origin.y);
     let contest = 0;
+    const lane = new Vec3(hoop.x - p.pos.x, 0, hoop.z - p.pos.z).normalize();
     for (const d of this.players) if (d.team !== p.team) {
       const gap = distance(d.pos, p.pos);
-      contest = Math.max(contest, clamp(1 - gap / 2.1, 0, 1) * (d.stagger ? 0.1 : d.defending || d.jump > 0 ? 1 : 0.72));
+      const toDefender = new Vec3(d.pos.x - p.pos.x, 0, d.pos.z - p.pos.z).normalize();
+      const inFront = clamp(0.65 + 0.35 * lane.dot(toDefender), 0.3, 1);
+      const facingShooter = -Math.sin(d.yaw) * toDefender.x - Math.cos(d.yaw) * toDefender.z;
+      const pressure = (d.stagger ? 0.1 : d.defending || d.jump > 0 ? 1 : 0.72) * (facingShooter < -0.2 ? 0.65 : 1);
+      contest = Math.max(contest, clamp(1 - gap / 2.1, 0, 1) * inFront * pressure);
     }
     const shot = makeShot({ from: origin, feet: p.pos, aim, charge: aiCharge ?? this.charge,
       physicalVelocity, contest, difficulty: p.id === 0 ? this.difficulty : 'park', heat: p.team === 0 && this.heatTime > 0, rng: this.rng, dunk, layup, moving: p.locoVel.length() });
@@ -181,7 +221,7 @@ export class GameEngine {
       rack: this.rack, rackBall: this.rackBall, money: this.rack === CONFIG.contest.moneyRack || this.rackBall === 4 };
     this.lastShot = this.shot;
     this.ball.launch(origin, shot.vel); this.ownerId = null; this.ballState = 'flight'; this.flightAge = 0;
-    this.lastTouch = p.id; this.charge = 0; this.passInfo = null;
+    this.lastTouch = p.id; this.charge = 0; this.passInfo = null; this.catchFrom = null;
     p.action = dunk ? 'dunk' : layup ? 'layup' : 'follow'; p.actionTime = 0.8; p.charge = 0; p.moveState = null;
     if (p.id === 0) { this.stats.attempts++; this.emit('shot', { shot: this.shot }); }
     return true;
@@ -203,6 +243,7 @@ export class GameEngine {
       for (const p of this.players) {
         const handBlock = p.id === 0 && this.hands.some(h => h.distanceTo(this.ball.pos) < 0.36);
         if (p.team === shot.team || p.stagger || p.jump < 0.1 && !handBlock) continue;
+        if (this.ball.vel.y < 0 && this.ball.pos.y > CONFIG.hoop.y) continue;
         const gap = distance(p.pos, this.ball.pos);
         const towardBall = new Vec3(this.ball.pos.x - p.pos.x, 0, this.ball.pos.z - p.pos.z).normalize();
         const facing = towardBall.dot(new Vec3(Math.sin(p.yaw), 0, Math.cos(p.yaw))) > -0.2;
@@ -242,9 +283,11 @@ export class GameEngine {
         if (rebound && p.team === this.possession && this.shot && !this.shot.hitRim && this.shotClock <= 0) { this.turnover('SHOT CLOCK.'); return; }
         const oldTeam = this.possession;
         const pass = this.passInfo;
-        this.giveBall(p, oldTeam !== p.team);
+        this.giveBall(p, oldTeam !== p.team, true);
+        if (rebound) this.lastPass = null;
         if (pass && p.team === pass.team) this.lastPass = { from: pass.from, to: p.id, time: this.time };
-        if (rebound && p.id === 0) { this.stats.rebounds++; this.emit('catch'); }
+        if (rebound && p.id === 0) this.stats.rebounds++;
+        this.emit('catch', { player: p.id });
         if (oldTeam !== p.team) this.toast('CLEAR IT.', p.team === 0 ? 'Take it beyond the arc, then attack.' : 'Get a stop. Stay between them and the rim.');
         return;
       }
@@ -275,17 +318,30 @@ export class GameEngine {
     }
   }
 
-  giveBall(p, changed = false) {
+  giveBall(p, changed = false, caught = false) {
+    const contact = caught ? this.ball.pos.clone() : null;
+    this.catchFrom = null;
     const hitRim = this.shot?.hitRim;
     this.ownerId = p.id; this.possession = p.team; this.ballState = 'dribble';
     this.shot = null; this.passInfo = null; this.charge = 0; this.flightAge = 0;
     this.lastTouch = p.id; this.ball.scored = false; p.ownedFor = 0; p.shield = 0.45;
-    p.moveState = null;
+    p.moveState = null; p.gatherFrom = null;
     if (changed) { this.needsClear = this.isMatch; this.shotClock = CONFIG.match.shotClock; this.lastPass = null; this.possessionPasses = 0; }
     else if (hitRim) this.shotClock = CONFIG.match.offensiveReboundClock;
+    if (caught) p.dribble = Math.PI * 0.5;
     this.updateOwnedBall(0);
+    if (contact) {
+      this.catchFrom = contact.clone().sub(p.pos); this.catchFrom.y -= p.jump;
+      this.ball.pos.copy(contact);
+    }
   }
-  scheduleCheck(team, duration = 1.2) { this.checkTeam = team; this.checkTimer = duration; this.ownerId = null; this.charge = 0; }
+  scheduleCheck(team, duration = 1.2) {
+    this.checkTeam = team; this.checkTimer = duration; this.ownerId = null; this.charge = 0;
+    this.passInfo = null; this.catchFrom = null;
+    for (const p of this.players) {
+      p.moveState = null; p.locoVel.set(0, 0, 0); p.vel.set(0, 0, 0); p.acceleration.set(0, 0, 0);
+    }
+  }
   resetPossession(team) {
     this.needsClear = false; this.shotClock = CONFIG.match.shotClock; this.lastPass = null; this.possessionPasses = 0;
     if (this.isMatch) {
@@ -317,11 +373,12 @@ export class GameEngine {
   }
   jump(p) {
     if (p.jump > 0 || p.jumpVel > 0 || p.stamina < 8) return;
-    p.jumpVel = CONFIG.player.jumpSpeed; p.stamina -= 12; if (p.action !== 'shooting') { p.action = 'jump'; p.actionTime = 0.7; }
+    const rimFinish = this.ownerId === p.id && (this.ballState === 'held' || p.action === 'shooting') && distance(p.pos, CONFIG.hoop) < 0.85;
+    p.jumpVel = rimFinish ? 4.85 : CONFIG.player.jumpSpeed; p.stamina = Math.max(0, p.stamina - 12); if (p.action !== 'shooting') { p.action = 'jump'; p.actionTime = 0.7; }
     this.emit('jump', { player: p.id });
   }
   dribbleMove(p, kind) {
-    if (this.ownerId !== p.id || this.ballState !== 'dribble' || p.moveCooldown > 0 || p.stamina < 16) return false;
+    if (this.mode === 'contest' || this.ownerId !== p.id || this.ballState !== 'dribble' || p.moveCooldown > 0 || p.stamina < 16) return false;
     if (!['cross', 'behind', 'spin', 'stepback'].includes(kind)) return false;
     const spec = MOVE_SPECS[kind]; if (p.stamina < spec.cost) return false;
     p.moveCooldown = spec.duration + 0.1; p.stamina -= spec.cost; p.shield = spec.shield;
@@ -342,28 +399,37 @@ export class GameEngine {
   }
   trySteal(p) {
     if (p.stealCooldown || p.stamina < 8 || this.owner?.team === p.team || !this.owner) return false;
-    p.stealCooldown = 0.9; p.stamina -= 10; p.action = 'reach'; p.actionTime = 0.35;
+    p.stealCooldown = 0.9; p.stamina = Math.max(0, p.stamina - 10); p.action = 'reach'; p.actionTime = 0.35;
     const o = this.owner, gap = distance(p.pos, this.ball.pos);
     const facing = new Vec3(Math.sin(p.yaw), 0, Math.cos(p.yaw));
     const direction = this.ball.pos.clone().sub(p.pos); direction.y = 0; direction.normalize();
     const handReach = p.id === 0 && this.hands.some(h => h.distanceTo(this.ball.pos) < 0.5);
     if ((gap < 1.28 && facing.dot(direction) > 0.2 || handReach) && !o.shield && this.ballState === 'dribble' && this.ball.pos.y < 1.3) {
-      this.giveBall(p, true); if (p.id === 0) this.stats.steals++;
+      this.giveBall(p, true, true); if (p.id === 0) this.stats.steals++;
       this.toast(p.team === 0 ? 'POCKET PICKED.' : 'STRIPPED.', p.team === 0 ? 'Clear it beyond the arc.' : 'Protect the ball. Use your moves.', p.team === 0 ? 'good' : 'bad');
       this.emit('steal', { player: p.id }); return true;
     }
     p.stagger = 0.24; return false;
   }
   pass(p, target = null) {
-    if (this.ownerId !== p.id || p.aiWait > 0.1) return false;
+    if (this.ownerId !== p.id || p.aiWait > 0.1 && (p.id !== 0 || this.preview)) return false;
     target ||= this.players.find(t => t.team === p.team && t.id !== p.id);
     if (!target) { if (p.id === 0) this.toast('YOU GOT THIS.', 'No teammate in 1v1. Create your shot.'); return false; }
     const origin = this.ball.pos.clone(); origin.y = Math.max(origin.y, 1.25);
-    const destination = target.pos.clone().addScaled(target.vel, 0.2); destination.y = 1.25;
-    const t = clamp(distance(origin, destination) / 9.5, 0.18, 0.8);
-    const vel = destination.sub(origin).scale(1 / t); vel.y += CONFIG.ball.gravity * t / 2;
+    // Solve the receiver's lead over the flight, including cuts toward either sideline.
+    const destination = target.pos.clone();
+    let t = 0;
+    for (let i = 0; i < 3; i++) {
+      t = clamp(distance(origin, destination) / 9.5, 0.18, 1.1);
+      destination.copy(target.pos).addScaled(target.vel, t);
+      destination.x = clamp(destination.x, -7.15, 7.15);
+      destination.z = clamp(destination.z, -7.7, 7.15);
+    }
+    destination.y = 1.25 + target.jump * 0.5;
+    const vel = destination.clone().sub(origin).scale(1 / t); vel.y += CONFIG.ball.gravity * t / 2;
     this.ball.launch(origin, vel); this.ballState = 'pass'; this.ownerId = null; this.shot = null;
-    this.passInfo = { from: p.id, to: target.id, team: p.team }; this.flightAge = 0; this.lastTouch = p.id;
+    this.passInfo = { from: p.id, to: target.id, team: p.team, destination, duration: t }; this.flightAge = 0; this.lastTouch = p.id;
+    p.passYaw = Math.atan2(vel.x, vel.z); p.moveState = null; this.catchFrom = null;
     this.possessionPasses++;
     this.charge = 0; p.aiWait = 0.65; p.action = 'pass'; p.actionTime = 0.4; this.emit('pass', { player: p.id });
     return true;
@@ -394,7 +460,7 @@ export class GameEngine {
             if (laneOpen && this.rng() < dt * 1.7) { this.pass(p, teammate); continue; }
           }
           if (p.action !== 'shooting' && p.ownedFor > 1.25 && (dist < 3.2 || p.ownedFor > 2.8 || this.shotClock < 4 || gap > 1.6 && dist < 7.2)) {
-            if (this.rng() < dt * 2.2) { p.action = 'shooting'; p.actionTime = 1.4; p.charge = 0; }
+            if (this.rng() < dt * 2.2) { this.beginGather(p); p.action = 'shooting'; p.actionTime = 1.4; p.charge = 0; }
           }
           if (p.action === 'shooting') {
             target.copy(p.pos); p.charge += dt;
@@ -411,7 +477,10 @@ export class GameEngine {
         target.copy(b.pos).addScaled(b.vel, fallTime); target.y = 0;
         if (this.ball.pos.y > 2.7) { target.x = clamp(target.x, -5, 5) + (p.id % 2 ? 0.35 : -0.35); target.z = clamp(target.z, -5.9, 4); }
         if (this.shot && this.shot.team !== p.team && distance(p.pos, this.ball.pos) < 1.4 && this.ball.vel.y > 0 && this.rng() < dt * 5) this.jump(p);
-        if (this.ballState === 'pass' && this.passInfo?.to === p.id) target.copy(p.pos); // Receive at the lead point, don't chase the passer.
+        if (this.passInfo?.to === p.id) {
+          target.copy(this.passInfo.destination);
+          p.yaw = Math.atan2(b.pos.x - p.pos.x, b.pos.z - p.pos.z);
+        }
       } else if (owner.team === p.team) {
         // The teammate alternates a cut with spacing on the opposite wing.
         const giveAndGo = this.lastPass?.from === p.id && this.time - this.lastPass.time < 2.6;
@@ -420,15 +489,19 @@ export class GameEngine {
       } else {
         const mark = this.players.find(t => t.team !== p.team && (t.id % 2 === p.id % 2)) || owner;
         const victim = mark.id === owner.id ? owner : mark;
+        const gathering = owner.action === 'shooting' || this.ballState === 'held';
+        const charge = owner.id === 0 && !this.preview ? this.charge : owner.charge;
         const dir = new Vec3(hoop.x - victim.pos.x, 0, hoop.z - victim.pos.z).normalize();
-        target.copy(victim.pos).addScaled(victim.vel, 0.14).addScaled(dir, owner.id === victim.id ? owner.action === 'shooting' ? 1.15 : 1.4 : 1.7);
+        target.copy(victim.pos).addScaled(victim.vel, 0.14).addScaled(dir, owner.id === victim.id ? gathering ? 1.15 : 1.4 : 1.7);
         if (owner.id !== victim.id && distance(owner.pos, hoop) < 2.7) target.set(owner.pos.x * 0.25, 0, -4.8);
         p.yaw = Math.atan2(victim.pos.x - p.pos.x, victim.pos.z - p.pos.z);
         if (!this.needsClear && owner.ownedFor > 1.2 && owner.id === victim.id && distance(p.pos, owner.pos) < 1.45 && this.rng() < dt * diff.stealRate * 0.45) this.trySteal(p);
-        if (owner.action === 'shooting' && owner.charge > 0.46 && distance(p.pos, owner.pos) < 1.45 && this.rng() < dt * 2.8) this.jump(p);
+        if (gathering && charge > 0.46 && distance(p.pos, owner.pos) < 1.45 && this.rng() < dt * 2.8) this.jump(p);
       }
       const v = target.sub(p.pos); v.y = 0;
-      const gap = v.length(); const speed = Math.min(gap * 3.2, diff.aiSpeed) * (p.stagger ? 0.18 : 1);
+      const gap = v.length();
+      const response = this.passInfo?.to === p.id ? 1 / Math.max(0.08, this.passInfo.duration - this.flightAge) : 3.2;
+      const speed = Math.min(gap * response, diff.aiSpeed) * (p.stagger ? 0.18 : 1);
       if (gap > 0.03) v.scale(speed / gap); else v.set(0, 0, 0);
       movePlayer(p, v, dt);
     }
@@ -476,7 +549,7 @@ export class GameEngine {
   }
   finish() {
     if (this.phase === 'result') return;
-    this.phase = 'result'; this.emit('finish', { won: this.score[0] > this.score[1], mode: this.mode }); this.emit('buzzer');
+    this.phase = 'result'; this.emit('finish', { won: this.score[0] > this.score[1], mode: this.mode }); if (!this.contestBuzzer) this.emit('buzzer');
   }
 }
 

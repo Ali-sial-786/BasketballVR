@@ -1,4 +1,5 @@
 import { CONFIG, MODES, RACKS } from './config.js';
+import { greenWindow } from './physics/basketball.js';
 import { loadBest, saveBest, saveSettings } from './game/settings.js';
 const $ = id => document.getElementById(id);
 const percent = n => `${Math.round(n * 100)}%`;
@@ -7,6 +8,7 @@ const stat = (value, label) => `<div class="result-stat"><strong>${value}</stron
 export class UI {
   constructor(engine, settings, hooks) {
     this.engine = engine; this.settings = settings; this.hooks = hooks; this.mode = '1v1'; this.toastUntil = 0; this.feedbackUntil = 0;
+    this.touchControls = [...document.querySelectorAll('[data-action]')];
     this.dialog = $('dialog'); this.content = $('dialog-content'); this.resumeOnClose = false; this.ignoreClose = false;
     for (const b of document.querySelectorAll('[data-mode]')) b.addEventListener('click', () => { this.selectMode(b.dataset.mode); hooks.uiSound(); });
     for (const b of document.querySelectorAll('[data-difficulty]')) b.addEventListener('click', () => { settings.difficulty = b.dataset.difficulty; this.syncSettings(); hooks.uiSound(); });
@@ -24,9 +26,10 @@ export class UI {
     $('dialog-close').addEventListener('click', () => this.dialog.close());
     this.dialog.addEventListener('close', () => {
       const resume = this.resumeOnClose; this.resumeOnClose = false;
-      if (!this.ignoreClose && resume) hooks.resume(); this.ignoreClose = false;
+      if (!this.ignoreClose && resume) hooks.resume();
+      else if (!this.ignoreClose && engine.phase === 'result') hooks.home();
+      this.ignoreClose = false;
     });
-    this.dialog.addEventListener('cancel', () => { if (engine.phase === 'result') { this.resumeOnClose = false; hooks.home(); } });
     this.syncSettings(); this.updateBest();
   }
   selectMode(mode) {
@@ -42,7 +45,12 @@ export class UI {
     this.engine.difficulty = this.settings.difficulty;
   }
   updateBest() { const best = loadBest(); $('personal-best').textContent = best ? `3PT PERSONAL BEST / ${best} POINTS` : 'FIVE RACKS. ONE HOT HAND.'; }
-  setPlaying(on) { document.body.classList.toggle('playing', on); $('hud').hidden = !on; $('menu').hidden = on; }
+  setPlaying(on) {
+    document.body.classList.toggle('playing', on); $('hud').hidden = !on; $('menu').hidden = on;
+    this.feedbackUntil = this.toastUntil = 0; this.rackKey = '';
+    $('shot-feedback').classList.remove('show'); $('toast').classList.remove('show');
+    if (on) this.update(performance.now() / 1000);
+  }
   setDemo(on, mode) {
     this.demo = on; document.body.classList.toggle('is-demo', on); $('demo-controls').hidden = !on;
     for (const b of document.querySelectorAll('[data-demo-mode]')) b.setAttribute('aria-pressed', String(b.dataset.demoMode === mode));
@@ -60,7 +68,7 @@ export class UI {
       ['W A S D / arrows', 'Move. Mouse to look. Hold Shift to sprint. Click the court to capture your mouse.'],
       ['Hold / release LMB', 'Gather, then release on the green band. Desktop and touch shots jump automatically. Set your feet for accuracy. Drive and jump near the rim for a layup or dunk.'],
       ['Q / E / R / C', 'Crossover / behind the back / spin / stepback. Chain moves to create space; watch your stamina.'],
-      ['Space / F', 'Jump to block or rebound. F or right-click to steal an exposed dribble. Hold Ctrl for a defensive stance.'],
+      ['Space / F', 'Jump to block or rebound. F or right-click to steal an exposed dribble. Hold Ctrl or the touch Guard button for a defensive stance.'],
       ['X', 'Pass in 2v2. Press again when Jax has it to call for the ball. Passes can be intercepted.'],
       ['Esc / M', 'Pause or return to the menu. On touch screens, use the movement pad and action buttons; drag the court to look.'],
     ];
@@ -123,9 +131,25 @@ export class UI {
     $('combo').textContent = e.comboUntil > e.time ? e.combo.join(' › ') : '';
     const gathering = e.ownerId === 0 && e.ballState === 'held'; $('shot-meter').classList.toggle('active', gathering);
     const f = Math.min(100, e.charge / CONFIG.shot.maxCharge * 100); $('meter-fill').style.width = `${f}%`; $('meter-needle').style.left = `${f}%`;
-    const window = { rookie: 0.12, park: 0.075, allstar: 0.05 }[e.difficulty] * (e.heatTime ? 1.3 : 1);
-    const zone = document.querySelector('.green-zone'); zone.style.left = `${(0.72 - window) / 1.35 * 100}%`; zone.style.width = `${window * 2 / 1.35 * 100}%`;
-    $('meter-word').textContent = Math.abs(e.charge - 0.72) < window ? 'LET IT FLY!' : e.charge < 0.72 ? 'FIND THE GREEN' : 'LATE';
+    const window = greenWindow(e.difficulty, e.heatTime > 0);
+    const zone = document.querySelector('.green-zone'); zone.style.left = `${(CONFIG.shot.idealTime - window) / CONFIG.shot.maxCharge * 100}%`; zone.style.width = `${window * 2 / CONFIG.shot.maxCharge * 100}%`;
+    $('meter-word').textContent = Math.abs(e.charge - CONFIG.shot.idealTime) <= window ? 'LET IT FLY!' : e.charge < CONFIG.shot.idealTime ? 'FIND THE GREEN' : 'LATE';
+    const possession = e.ownerId === 0;
+    const defense = e.isMatch && e.possession === 1;
+    for (const button of this.touchControls) {
+      const action = button.dataset.action;
+      let available;
+      if (action === 'pass') {
+        available = e.mode === '2v2' && e.owner?.team === 0;
+        button.textContent = possession ? 'PASS' : 'CALL';
+      } else if (action === 'defend' || action === 'steal') available = defense;
+      else if (action === 'jump') available = !contest;
+      else if (action === 'shoot') available = possession;
+      else available = possession && !contest;
+      // Keep the ongoing pointer target until release or cancellation.
+      button.hidden = !available && !button.matches(':active');
+    }
+    $('touch-stick').hidden = contest;
     $('rack-progress').hidden = !contest;
     if (contest) {
       const key = `${e.rack}:${e.rackBall}:${e.contestShots}`;

@@ -3,7 +3,7 @@ import { CONFIG, DIFFICULTIES } from '../config.js';
 
 export function isThree(p) {
   const h = CONFIG.hoop;
-  return Math.abs(p.x) >= CONFIG.court.cornerX || Math.hypot(p.x - h.x, p.z - h.z) >= CONFIG.court.threeRadius;
+  return Math.abs(p.x) >= CONFIG.court.cornerX || (p.z > h.z && Math.hypot(p.x - h.x, p.z - h.z) >= CONFIG.court.threeRadius);
 }
 
 // Solve the descending basket crossing, rather than pointing a straight throw
@@ -17,8 +17,12 @@ export function arcVelocity(from, target, apex = 4.8) {
   return new Vec3((target.x - from.x) * dragScale, vy, (target.z - from.z) * dragScale);
 }
 
+export function greenWindow(difficulty, heat) {
+  return DIFFICULTIES[difficulty].greenWindow * (heat ? 1.3 : 1);
+}
+
 export function releaseQuality(charge, difficulty = 'park', heat = false) {
-  const window = DIFFICULTIES[difficulty].greenWindow * (heat ? 1.3 : 1);
+  const window = greenWindow(difficulty, heat);
   const error = charge - CONFIG.shot.idealTime;
   return { quality: clamp(1 - Math.max(0, Math.abs(error) - window) / 0.65, 0, 1),
     green: Math.abs(error) <= window, timing: Math.abs(error) <= window ? 'PERFECT' : error < 0 ? 'EARLY' : 'LATE' };
@@ -46,13 +50,21 @@ export function makeShot({ from, feet, aim, charge = 0.72, physicalVelocity = nu
   const error = Math.pow(1 - quality, 1.55) * (1.2 - d.assist * 0.45);
   const side = (rng() - 0.5) * 2 * error;
   const depth = (q.timing === 'EARLY' || q.timing === 'SOFT' ? 1 : -1) * error * 0.75;
-  const aimCross = facing.x * to.z - facing.z * to.x;
-  const target = new Vec3(h.x + side + aimCross * (1 - d.assist) * 0.5, h.y, h.z + depth);
+  const right = new Vec3(-to.z, 0, to.x);
+  const aimOffset = facing.dot(right) * (1 - d.assist) * 0.5;
+  const target = new Vec3(h.x, h.y, h.z).addScaled(right, side + aimOffset).addScaled(to, -depth);
   if (!assisted) {
     target.x = from.x + facing.x * Math.max(2, dist);
     target.z = from.z + facing.z * Math.max(2, dist);
   }
-  const vel = arcVelocity(from, target, dunk ? Math.max(from.y + 0.35, 3.5) : layup ? 3.75 + dist * 0.075 : 4.4 + dist * 0.075);
+  let vel;
+  if (dunk && from.y > h.y) {
+    // Drive the ball down from the actual hand. The same rim and downward
+    // crossing test decide whether it goes through.
+    const down = 2.6;
+    const flight = 2 * (from.y - h.y) / (Math.sqrt(down * down + 2 * CONFIG.ball.gravity * (from.y - h.y)) + down);
+    vel = new Vec3((h.x - from.x) / flight, -down, (h.z - from.z) / flight);
+  } else vel = arcVelocity(from, target, layup ? 3.75 + dist * 0.075 : 4.4 + dist * 0.075);
   return { vel, quality, green: q.green && contest < 0.35 && assisted && movementPenalty < 0.08, timing: q.timing,
     contest, value: dunk || layup ? 2 : isThree(feet) ? 3 : 2, distance: dist, assisted, dunk, layup, moving };
 }

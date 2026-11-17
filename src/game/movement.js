@@ -28,8 +28,9 @@ export function beginMove(p, kind) {
   const right = new Vec3(-Math.cos(p.yaw), 0, Math.sin(p.yaw));
   const fromSide = p.side, toSide = kind === 'cross' || kind === 'behind' ? -fromSide : fromSide;
   const direction = kind === 'stepback' ? forward.scale(-1) : kind === 'spin' ? forward : right.scale(toSide);
+  const entry = dribbleOffset(p);
   p.side = toSide;
-  return p.moveState = { kind, age: 0, duration: spec.duration, travel: spec.travel, fromSide, toSide, direction };
+  return p.moveState = { kind, age: 0, duration: spec.duration, travel: spec.travel, fromSide, toSide, direction, entry };
 }
 
 export function advanceMove(p, dt) {
@@ -44,21 +45,30 @@ export function advanceMove(p, dt) {
 
 // Local coordinates: +X is the ball-hand side, +Z is forward. A quadratic
 // bounce has a continuous airborne path and a sharp, audible floor contact.
+export function dribbleHand(p) {
+  const m = p.moveState;
+  return m && m.age < m.duration * 0.5 ? m.fromSide : p.side;
+}
+
 export function dribbleOffset(p) {
   const phase = ((p.dribble % Math.PI) + Math.PI) % Math.PI / Math.PI;
   const speed = p.vel.length();
   const offset = new Vec3(p.side * 0.44, 0.13 + 4 * phase * (1 - phase) * (0.88 - Math.min(0.16, speed * 0.025)), 0.29 + Math.min(0.17, speed * 0.035));
   const m = p.moveState; if (!m) return offset;
   const u = clamp(m.age / m.duration, 0, 1), transfer = ease(u);
+  const bounce = offset.clone();
   if (m.kind === 'cross' || m.kind === 'behind') {
     offset.x = (m.fromSide + (m.toSide - m.fromSide) * transfer) * 0.48;
-    offset.y = 0.15 + Math.abs(Math.cos(Math.PI * u)) * 0.68;
+    offset.y = 0.12 + Math.abs(Math.cos(Math.PI * u)) * 0.68;
     offset.z = m.kind === 'behind' ? 0.18 - Math.sin(Math.PI * u) * 0.6 : 0.33 + Math.sin(Math.PI * u) * 0.12;
   } else if (m.kind === 'spin') {
     offset.x = Math.cos(u * Math.PI * 2) * m.fromSide * 0.4;
-    offset.z = 0.12 + Math.sin(u * Math.PI * 2) * 0.36;
+    offset.z = 0.18 + Math.sin(u * Math.PI * 2) * 0.36 * m.fromSide;
     offset.y = 0.7 + Math.cos(u * Math.PI * 2) * 0.13;
   }
+  // Preserve the exact ball position at both ends, whatever the bounce phase.
+  if (u < 0.2) return offset.lerp(m.entry, 1 - ease(u / 0.2));
+  if (u > 0.8) return offset.lerp(bounce, ease((u - 0.8) / 0.2));
   return offset;
 }
 

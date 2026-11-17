@@ -41,7 +41,14 @@ export class Audio {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
     switch (event.type) {
-      case 'bounce': if (t - this.lastBounce < 0.085) return; this.lastBounce = t; this.tone(145, 0.1, 0.13, 'sine', 0, 55); this.hiss(0.045, 440, 0.1); break;
+      case 'bounce': {
+        if (t - this.lastBounce < 0.085) return;
+        this.lastBounce = t;
+        const impact = Math.min(1, Math.max(0.12, (event.speed ?? 3) / 6));
+        this.tone(112 + 40 * impact, 0.075 + 0.045 * impact, 0.06 + 0.13 * impact, 'sine', 0, 51);
+        this.hiss(0.045, 380 + 150 * impact, 0.025 + 0.11 * impact);
+        break;
+      }
       case 'rim': this.tone(580, 0.16, 0.12, 'triangle', 0, 430); this.hiss(0.06, 1800, 0.08); break;
       case 'board': this.tone(210, 0.13, 0.12, 'triangle'); break;
       case 'move': this.hiss(0.15, 2600, 0.08); this.tone(1600, 0.06, 0.035, 'sine', 0, 2400); break;

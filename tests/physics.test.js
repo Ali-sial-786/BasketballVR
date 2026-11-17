@@ -38,7 +38,7 @@ test('physical flick uses form and gives soft releases less assistance', () => {
   const clean = makeShot({ ...base, physicalVelocity: new Vec3(0, 2, -1) }); assert(clean.green); assert(clean.quality > soft.quality);
 });
 test('corner threes use the straight sideline, and inside jump shots are twos', () => {
-  assert(isThree({ x: 6.65, z: -6.1 })); assert(!isThree({ x: 6.5, z: -6.1 })); assert(isThree({ x: 0, z: 0.8 }));
+  assert(isThree({ x: 6.65, z: -6.1 })); assert(!isThree({ x: 6.5, z: -6.1 })); assert(!isThree({ x: 6.55, z: -8 })); assert(isThree({ x: 0, z: 0.8 }));
   const v = arcVelocity(new Vec3(0, 3.5, -5), CONFIG.hoop, 3.8); assert(Number.isFinite(v.y));
 });
 

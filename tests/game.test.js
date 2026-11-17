@@ -88,3 +88,62 @@ test('seeded 1v1 and 2v2 AI actually complete games with finite, bounded state',
     assert.equal(g.phase, 'result', mode); assert(Math.max(...g.score) >= 11);
   }
 });
+
+test('the shot clock continues during a pass and a loose ball', () => {
+  for (const state of ['pass', 'loose']) {
+    const g = fresh('2v2'); g.shotClock = 0.05;
+    assert(g.pass(g.human)); g.ballState = state;
+    advance(g, 0.08);
+    assert(g.checkTimer > 0); assert.equal(g.checkTeam, 1);
+  }
+});
+
+test('a contest buzzer during a rack transition ends the round with one score and one horn', () => {
+  const g = fresh('contest'); cleanShot(g); g.basket();
+  g.contestTime = 0.05; advance(g, 1);
+  assert.equal(g.phase, 'result'); assert.equal(g.score[0], 1); assert.equal(g.contestShots, 1);
+  assert.equal(g.drainEvents().filter(e => e.type === 'buzzer').length, 1);
+});
+
+test('the receiver runs onto a lead pass and takes possession at the contact point', () => {
+  const g = new GameEngine(); g.start('2v2'); g.checkTimer = 0;
+  g.human.pos.set(-3, 0, 2);
+  const receiver = g.players[1]; receiver.pos.set(3, 0, 1); receiver.locoVel.set(0, 0, -2.5); receiver.vel.copy(receiver.locoVel);
+  for (const d of g.players.slice(2)) d.pos.set(-6, 0, -6);
+  g.updateOwnedBall(0); assert(g.pass(g.human));
+  assert(g.passInfo.destination.z < 0);
+  for (let i = 0; i < 120 && !g.owner; i++) {
+    const from = g.ball.pos.clone(); g.step(1 / 120);
+    assert(g.ball.pos.distanceTo(from) < 0.14);
+  }
+  assert.equal(g.owner, receiver); assert(receiver.pos.z < 0.25);
+  assert.deepEqual(g.lastPass, { from: 0, to: 1, time: g.time });
+  assert(g.drainEvents().some(e => e.type === 'catch' && e.player === 1));
+});
+
+test('an on-ball defender in front affects a release more than a trailing defender', () => {
+  const pressure = z => {
+    const g = fresh('1v1'), defender = g.players[1];
+    g.human.pos.set(0, 0, 0); defender.pos.set(0, 0, z);
+    defender.yaw = z < 0 ? 0 : Math.PI; defender.defending = true;
+    cleanShot(g); return g.shot.contest;
+  };
+  assert(pressure(-0.8) > 2 * pressure(0.8));
+});
+
+test('a close finish launches downward from the gathered ball and crosses the rim', () => {
+  const g = fresh('practice'); g.human.pos.set(0, 0, CONFIG.hoop.z + 0.4); g.updateOwnedBall(0);
+  advance(g, 0.72, { gather: true, aim: aim(g), autoJump: true });
+  const hand = g.ball.pos.clone();
+  g.step(1 / 120, { release: {}, aim: aim(g) });
+  assert(g.shot.dunk); assert(g.shot.vel.y < 0); assert(g.shot.origin.distanceTo(hand) < 1e-8);
+  advance(g, 0.25); assert.deepEqual(g.score, [2, 0]);
+});
+
+test('cancelling a gather discards its release and a contest player stays at their rack', () => {
+  const g = fresh('contest'), spot = g.human.pos.clone();
+  advance(g, 0.3, { gather: true, moveAction: 'stepback', move: { x: 1 } });
+  g.step(1 / 120, { cancelGather: true }); g.step(1 / 120, { release: {} });
+  assert.equal(g.ballState, 'dribble'); assert.equal(g.stats.attempts, 0); assert.equal(g.charge, 0);
+  assert.equal(g.human.pos.distanceTo(spot), 0);
+});

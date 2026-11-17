@@ -19,8 +19,8 @@ export function label(parent, text, width, height, position, { color = '#eee7ce'
   const m = mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshBasicMaterial({ map: texture, transparent: !background, side: THREE.DoubleSide, depthWrite: !!background }), parent, position);
   m.rotation.y = rotation; return m;
 }
-let ballGeometry, ballMaterial;
-export function makeBall() {
+let ballGeometry, ballMaterial, moneyMaterial;
+export function makeBall(money = false) {
   if (!ballGeometry) {
     ballGeometry = new THREE.SphereGeometry(0.12, 24, 16);
     const texture = canvasTexture(1024, 512, (c, w, h) => {
@@ -34,8 +34,14 @@ export function makeBall() {
       }
     });
     ballMaterial = material(0xffffff, { map: texture, roughness: 0.9 });
+    // Tint a neutral leather texture so money balls retain their seams.
+    const gold = canvasTexture(1024, 512, (c, w, h) => {
+      c.drawImage(texture.image, 0, 0);
+      c.globalCompositeOperation = 'color'; c.fillStyle = '#efbf41'; c.fillRect(0, 0, w, h);
+    });
+    moneyMaterial = material(0xffecb7, { map: gold, roughness: 0.64 });
   }
-  const b = new THREE.Mesh(ballGeometry, ballMaterial); b.castShadow = true; return b;
+  const b = new THREE.Mesh(ballGeometry, money ? moneyMaterial : ballMaterial); b.castShadow = true; return b;
 }
 let shadowTexture;
 export function shadow(parent, radius = 0.45, opacity = 0.35) {

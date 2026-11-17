@@ -39,6 +39,7 @@ async function init() {
   const input = new Input(renderer, rig, camera, renderer.domElement), hands = new HandsView(scene, court.environment);
   let players = [], menu = true, demo = false, demoRestart = 0, accumulator = 0, lastTime = null, uiTick = 0, pending = {}, blink = 0, xrBlink = 0, nextFrame = false;
   const demoFocus = new THREE.Vector3(0, 1.2, -2.2), demoPosition = new THREE.Vector3();
+  const viewerPosition = new THREE.Vector3();
   let lastHeadRef = null;
   const blinkElement = document.getElementById('blink');
   // An eye-centred black sphere fades short relocations inside the headset too.
@@ -83,8 +84,10 @@ async function init() {
   }
   function takeControl() {
     if (!demo) return;
-    engine.charge = engine.human.charge;
-    if (engine.human.action === 'shooting' && engine.ownerId === 0) engine.ballState = 'held';
+    if (engine.preview && engine.human.action === 'shooting' && engine.ownerId === 0) {
+      engine.charge = engine.human.charge; engine.ballState = 'held';
+      engine.human.action = ''; engine.human.actionTime = 0;
+    }
     demo = false; engine.preview = false; ui.setDemo(false); input.clear(); input.enabled = true;
     pending = {}; accumulator = 0; nextFrame = true; faceBasket(); input.lock();
   }
@@ -114,7 +117,7 @@ async function init() {
   const xrUI = new XRUI(scene, input, engine, settings, { play: start, resume, select: mode => ui.selectMode(mode), settings: () => ui.syncSettings(), exit: () => xr.end() });
   const xr = new XRSessionManager(renderer, {
     onStart: () => {
-      demo = false; ui.setDemo(false); engine.preview = false;
+      engine.preview = menu || demo || engine.preview; demo = false; ui.setDemo(false);
       document.body.classList.add('in-xr'); renderer.shadowMap.enabled = false;
       input.unlock(); input.enabled = false; input.clear(); engine.pause(); menu = false;
       // The first XR pose, not the old cinematic camera, places the menu.
@@ -190,13 +193,13 @@ async function init() {
       lastTime = now; nextFrame = false;
       input.update(now, frame);
       // Real horizontal headset displacement is applied before stick input.
-      if (input.xr && engine.phase === 'playing' && !menu && !engine.checkTimer && lastHeadRef) {
+      if (input.xr && input.viewerTracked && engine.phase === 'playing' && !menu && !engine.checkTimer && lastHeadRef) {
         const delta = new THREE.Vector3(input.headRef.p.x - lastHeadRef.x, 0, input.headRef.p.z - lastHeadRef.z);
         if (delta.length() < 0.3) { delta.applyAxisAngle(new THREE.Vector3(0, 1, 0), rig.rotation.y); engine.human.pos.x += delta.x; engine.human.pos.z += delta.z; }
       }
-      lastHeadRef = input.xr ? { x: input.headRef.p.x, z: input.headRef.p.z } : null;
+      lastHeadRef = input.xr && input.viewerTracked ? { x: input.headRef.p.x, z: input.headRef.p.z } : null;
       const cmd = demo ? demoCommand(engine) : input.command(dt, settings, engine);
-      const discrete = ['gather', 'release', 'jump', 'moveAction', 'steal', 'pass', 'blink', 'blinkStep'];
+      const discrete = ['gather', 'cancelGather', 'release', 'jump', 'moveAction', 'steal', 'pass', 'blink', 'blinkStep'];
       for (const key of discrete) if (cmd[key] != null) pending[key] = cmd[key];
       if (cmd.blink) { blink = 0.13; xrBlink = 0.13; }
       if (engine.phase === 'playing') {
@@ -218,7 +221,8 @@ async function init() {
           if (event.type === 'recenter' && !demo) faceBasket();
           if (['shot', 'bounce', 'steal', 'block', 'catch', 'move', 'score'].includes(event.type)) {
             const strength = { shot: 0.2, bounce: 0.1, steal: 0.5, block: 0.7, catch: 0.3, move: 0.18, score: 0.6 }[event.type];
-            if (input.xr) input[settings.dominant].pulse(strength, event.type === 'score' ? 90 : 25);
+            const personal = (event.player ?? event.owner) === 0 || event.type === 'shot' || event.type === 'score' && event.team === 0;
+            if (input.xr && personal) input[input.physicalGather || settings.dominant].pulse(strength, event.type === 'score' ? 90 : 25);
           }
           if (event.type === 'finish') {
             if (demo) { demoRestart = 3; continue; }
@@ -235,7 +239,13 @@ async function init() {
         const c = input[input.physicalGather || settings.dominant];
         if (c.tracked) { engine.hand = c.gripPose.p.clone().add(new Vec3(0, 0.03, -0.06).applyQuat(c.gripPose.q)); engine.updateOwnedBall(0); }
       }
-      for (const view of players) { const p = engine.players.find(p => p.id === view.id); if (p) view.update(dt, engine.time, p, engine, menu || demo || p.id !== 0); }
+      const viewer = input.xr ? input.head.p : camera.getWorldPosition(viewerPosition);
+      for (const [i, view] of players.entries()) {
+        const p = engine.players[i];
+        const local = p.id === 0 && !menu && !demo;
+        view.update(dt, engine.time, p, engine, !local || !input.xr, local && !input.xr);
+        if (!local) view.h.updateLod(viewer);
+      }
       hands.update(input, engine, !menu && !demo && engine.phase === 'playing'); effects.update(dt, engine); court.update(dt, engine);
       xrUI.update(dt, now);
       uiTick += dt; if (uiTick > 0.05) { uiTick = 0; if (!menu) ui.update(now); }

@@ -1,5 +1,5 @@
 // Basketball athletes adapted from Crease VR: adult-proportioned, CC0
-// MakeHuman anatomy, 47k / 9k triangle LODs, 17-bone skinning, baked AO,
+// MakeHuman anatomy, 56k / 9k triangle LODs, 17-bone skinning, baked AO,
 // team colors, modeled faces/fingers and analytic two-bone IK.
 //
 // Canonical pose used by all animation code: standing, arms hanging straight
@@ -175,6 +175,32 @@ function geometryFor(o, lod) {
     g = mergeGeometries([...parts, ...buildGear(RIG, gearPart, o, lod)], false);
     RIG.geoCache.set(key, g);
   }
+  return g;
+}
+
+// The desktop player's arms use the same vertices, skin weights and skeleton
+// as their courtside model. Only the triangles submitted to the GPU change.
+function armGeometry() {
+  const key = 'first-person-arms';
+  if (RIG.geoCache.has(key)) return RIG.geoCache.get(key);
+  const body = RIG.lods[0].find(part => part.name === 'Athlete_Body').geo;
+  const { skinIndex, skinWeight } = body.attributes;
+  const arms = new Set(['shoulderL', 'shoulderR', 'elbowL', 'elbowR', 'handL', 'handR'].map(name => RIG.index[name]));
+  const include = new Uint8Array(skinIndex.count);
+  for (let i = 0; i < include.length; i++) {
+    let weight = 0;
+    for (let j = 0; j < 4; j++) if (arms.has(skinIndex.getComponent(i, j))) weight += skinWeight.getComponent(i, j);
+    include[i] = weight > 0.55;
+  }
+  const indices = [];
+  for (let i = 0; i < body.index.count; i += 3) {
+    const [a, b, c] = body.index.array.subarray(i, i + 3);
+    if (include[a] && include[b] && include[c]) indices.push(a, b, c);
+  }
+  const g = new THREE.BufferGeometry();
+  for (const [name, buffer] of Object.entries(body.attributes)) g.setAttribute(name, buffer);
+  g.setIndex(indices);
+  RIG.geoCache.set(key, g);
   return g;
 }
 
@@ -383,12 +409,13 @@ export class Humanoid {
 
   // Pick the level of detail for every visible figure from the viewer's position.
   static updateLods(viewer, nearDist = 13) {
-    for (const h of Humanoid.all) {
-      if (!h.root.visible) continue;
-      const p = h.root.position;
-      const d = Math.hypot(p.x - viewer.x, p.z - viewer.z);
-      h.setLod(d > nearDist * (h.lod === 0 ? 1.15 : 1) ? 1 : 0);
-    }
+    for (const h of Humanoid.all) if (h.root.visible) h.updateLod(viewer, nearDist);
+  }
+
+  updateLod(viewer, nearDist = 13) {
+    const p = this.root.position;
+    const distance = Math.hypot(p.x - viewer.x, p.z - viewer.z);
+    this.setLod(distance > nearDist * (this.lod === 0 ? 1.15 : 1) ? 1 : 0);
   }
 
   // Shirt number on the back (0 = none).
@@ -414,11 +441,17 @@ export class Humanoid {
     this.setNumber(o.number);
   }
 
+  setArmsOnly(on) {
+    if (this.armsOnly === on) return;
+    this.armsOnly = on;
+    this.mesh.geometry = on ? armGeometry() : geometryFor(this.opts, this.lod);
+  }
+
   // 0 = full detail, 1 = distant.
   setLod(lod) {
     if (lod === this.lod) return;
     this.lod = lod;
-    this.mesh.geometry = geometryFor(this.opts, lod);
+    if (!this.armsOnly) this.mesh.geometry = geometryFor(this.opts, lod);
   }
 
   // See-through body: what you see of yourself when you look down. No head

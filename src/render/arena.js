@@ -234,7 +234,7 @@ export class Arena {
       for (const z of [-0.7, 0.7]) cylinderBetween(rack, V(-0.2, 0.04, z), V(0.2, 0.04, z), 0.025, palette.steel);
       for (const x of [-0.1, 0.1]) cylinderBetween(rack, V(x, 0.8, -0.7), V(x, 0.8, 0.7), 0.025, palette.steel);
       cylinderBetween(rack, V(0, 0, 0.7), V(0, 0.85, 0.7), 0.025, palette.steel);
-      for (let i = 0; i < 5; i++) { const b = makeBall(); b.position.set(0, 0.93, -0.54 + i * 0.27); if (ri === 2 || i === 4) b.material = material(0xf4c669, { metalness: 0.4 }); rack.add(b); this.rackBalls.push(b); }
+      for (let i = 0; i < 5; i++) { const b = makeBall(ri === CONFIG.contest.moneyRack || i === 4); b.position.set(0, 0.93, -0.54 + i * 0.27); rack.add(b); this.rackBalls.push(b); }
     });
   }
 
@@ -262,12 +262,18 @@ export class Arena {
   }
 
   drawScore(engine) {
+    const contest = engine.mode === 'contest';
+    const away = contest ? Math.ceil(engine.contestTime) : engine.score[1];
+    const clock = engine.mode === 'preview' ? 'PLAY' : engine.mode === 'practice' ? '∞' : contest ? '3PT' : Math.ceil(engine.shotClock);
+    const key = [engine.mode, engine.score[0], away, clock].join('|');
+    if (this.boardKey === key) return;
+    this.boardKey = key;
     const c = this.boardCanvas.getContext('2d'); c.fillStyle = '#172f34'; c.fillRect(0, 0, 1024, 320);
     c.fillStyle = '#ffb47d'; c.textAlign = 'center'; c.font = '900 34px Arial'; c.fillText('R I M R U N   /   T H E   F I E L D H O U S E', 512, 47);
     c.fillStyle = '#f1e7cb'; c.font = '900 38px Arial';
     c.fillText(engine.mode === 'contest' ? 'POINTS' : 'HOME', 220, 105); c.fillText(engine.mode === 'contest' ? 'SECONDS' : 'AWAY', 804, 105);
-    c.font = '900 140px Arial'; c.fillText(String(engine.score[0]).padStart(2, '0'), 220, 245); c.fillText(String(engine.mode === 'contest' ? Math.ceil(engine.contestTime) : engine.score[1]).padStart(2, '0'), 804, 245);
-    c.fillStyle = '#e49b72'; c.font = '900 58px Arial'; c.fillText(engine.mode === 'preview' ? 'PLAY' : engine.mode === 'practice' ? '∞' : engine.mode === 'contest' ? '3PT' : Math.ceil(engine.shotClock), 512, 215);
+    c.font = '900 140px Arial'; c.fillText(String(engine.score[0]).padStart(2, '0'), 220, 245); c.fillText(String(away).padStart(2, '0'), 804, 245);
+    c.fillStyle = '#e49b72'; c.font = '900 58px Arial'; c.fillText(clock, 512, 215);
     c.font = '900 23px Arial'; c.fillText(engine.mode === 'contest' ? 'MAKE IT RAIN' : 'RUN IT BACK', 512, 284);
     this.boardTexture.needsUpdate = true;
   }
@@ -285,7 +291,7 @@ export class Arena {
       attribute.needsUpdate = true; this.netWasMoving = this.netTime > 0;
     }
     this.rackGroup.visible = engine.mode === 'contest' && !engine.preview;
-    if (this.rackGroup.visible) this.rackBalls.forEach((b, i) => { b.visible = i >= engine.rack * 5 + engine.rackBall; });
+    if (this.rackGroup.visible) this.rackBalls.forEach((b, i) => { b.visible = i > engine.rack * 5 + engine.rackBall; });
     this.boardTick = (this.boardTick || 0) + dt;
     if (this.boardTick > 0.15) { this.boardTick = 0; this.drawScore(engine); }
   }
