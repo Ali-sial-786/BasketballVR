@@ -40,3 +40,32 @@ test('uploaded Mixamo dribble is present, animated, grounded, and finite across 
   }
   assert(Math.max(...positions) - Math.min(...positions) > 0.1, 'retargeted hand must actually dribble');
 });
+
+test('planted feet stay in world space through a short defensive slide and clear the floor', async () => {
+  const { Footwork } = await import('../src/render/footwork.js');
+  const h = new Humanoid({ headgear: 'bare' }), footwork = new Footwork();
+  const p = { pos: new THREE.Vector3(), vel: new THREE.Vector3(), jump: 0, defending: true };
+  h.reset(); applyClip(h, 'set', 0); footwork.update(1 / 120, p, h, false);
+  const planted = h.worldPos('ankleL', new THREE.Vector3());
+  for (let i = 0; i < 10; i++) {
+    h.reset(); applyClip(h, 'set', 0); p.pos.x += 0.008; p.vel.x = 0.96; h.root.position.copy(p.pos);
+    footwork.update(1 / 120, p, h, false);
+  }
+  assert(h.worldPos('ankleL', new THREE.Vector3()).distanceTo(planted) < 0.005);
+  assert(h.lowest() > -0.025);
+});
+
+test('eyes align with their sockets, shoe surfaces face out, and concealed feet cannot poke through', async () => {
+  const meta = JSON.parse(await fs.readFile(new URL('../public/assets/models/athlete.json', import.meta.url)));
+  const binary = await fs.readFile(new URL('../public/assets/models/athlete.bin', import.meta.url));
+  const vertices = name => {
+    const p = meta.lods[0].parts.find(p => p.name === name), v = [];
+    for (let i = 0; i < p.vCount; i++) v.push({ x: binary.readFloatLE(p.pos + i * 12), y: binary.readFloatLE(p.pos + i * 12 + 4), z: binary.readFloatLE(p.pos + i * 12 + 8), ny: binary.readInt8(p.nrmKit + i * 4 + 1) / 127 });
+    return v;
+  };
+  const centerY = v => (Math.min(...v.map(p => p.y)) + Math.max(...v.map(p => p.y))) / 2;
+  assert(Math.abs(centerY(vertices('Details_Sclera')) - centerY(vertices('Details_Iris'))) < 0.003);
+  assert(vertices('Athlete_Body').every(p => p.y > 0.25));
+  const top = vertices('Details_Shoe').filter(p => p.z > 0.13 && p.y > 0.07 && p.y < 0.13);
+  assert(top.length > 10); assert(top.reduce((sum, p) => sum + p.ny, 0) / top.length > 0.15);
+});

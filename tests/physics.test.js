@@ -41,3 +41,12 @@ test('corner threes use the straight sideline, and inside jump shots are twos', 
   assert(isThree({ x: 6.65, z: -6.1 })); assert(!isThree({ x: 6.5, z: -6.1 })); assert(isThree({ x: 0, z: 0.8 }));
   const v = arcVelocity(new Vec3(0, 3.5, -5), CONFIG.hoop, 3.8); assert(Number.isFinite(v.y));
 });
+
+test('setting your feet improves a jump shot, while a close layup keeps its soft arc', () => {
+  const base = { from: new Vec3(0, 2, 1), feet: new Vec3(0, 0, 1), aim: new Vec3(0, 0, -1), rng: () => 0.5 };
+  const set = makeShot(base), running = makeShot({ ...base, moving: 4.5 });
+  assert(set.quality > running.quality); assert(set.green); assert.equal(running.green, false);
+  const from = new Vec3(0.3, 2.2, -4.5), layup = makeShot({ ...base, from, feet: from, moving: 3, layup: true });
+  const ball = new Basketball(); ball.launch(from, layup.vel);
+  assert(run(ball, 2).some(e => e.type === 'basket')); assert.equal(layup.value, 2);
+});

@@ -1,6 +1,6 @@
-"""Create Courtside's original stylized, skinned tennis athlete from CC0 HM08 anatomy.
-Run: blender -b -t 6 --python tools/build_athlete.py [-- --preview]
-Inputs are fetched by tools/fetch_character_source.py. All visible tailoring is
+"""Build an athletic basketball character from the CC0 HM08 anatomy pipeline.
+Run: blender -b -t 6 --python tools/rebuild_anatomy.py [-- --preview]
+Inputs are fetched by tools/fetch_anatomy.py. All visible tailoring is
 baked into the exported geometry; the only remaining modifiers are armature skinning.
 """
 import bpy, bmesh, math, json, random, sys
@@ -22,7 +22,7 @@ for line in (SRC / 'base.obj').read_text().splitlines():
     elif a[0] == 'vt': uvs.append(tuple(map(float, a[1:3])))
     elif a[0] == 'g': group = a[1]; groups.setdefault(group, [])
     elif a[0] == 'f': groups[group].append([(int(p.split('/')[0])-1, int(p.split('/')[1])-1) for p in a[1:]])
-for fn, strength in [('male.target', .70), ('athletic.target', .30)]:
+for fn, strength in [('male.target', .85), ('athletic.target', .55)]:
     for line in (SRC / fn).read_text().splitlines():
         a = line.split()
         if len(a) == 4 and not line.startswith('#'):
@@ -89,8 +89,8 @@ accent = material('Accent',(.72,.84,.43),.72)
 white = material('Shoe',(.83,.86,.84),.73)
 sole = material('Sole',(.35,.40,.41),.85)
 hair = material('Hair',(.031,.018,.013),.78)
-sclera = material('Sclera',(.87,.89,.86),.29)
-iris = material('Iris',(.09,.22,.20),.33)
+sclera = material('Sclera',(.64,.67,.63),.29)
+iris = material('Iris',(.115,.065,.030),.33)
 pupil = material('Pupil',(.004,.006,.005),.23)
 mouth = material('Mouth',(.075,.028,.024),.82)
 
@@ -158,24 +158,15 @@ fullhead = source_mesh('_HeadConstruction',[f for f in groups['body'] if min(ver
 subdivide(fullhead,1)
 head_bvh = BVHTree.FromPolygons([v.co for v in fullhead.data.vertices],[list(p.vertices) for p in fullhead.data.polygons],all_triangles=False)
 bpy.data.objects.remove(fullhead,do_unlink=True)
-# A short soft nose, rounded cheeks and a relaxed smile make the default face friendly.
-for v in body.data.vertices:
-    x,y,z=v.co
-    if y<-.14 and 1.59<z<1.635:
-        influence=math.exp(-(x/.018)**2-((z-1.610)/.017)**2)
-        v.co.y+=max(0.,-y-.150)*.36*influence
-    if y<-.115 and 1.583<z<1.637:
-        cheek=math.exp(-((abs(x)-.041)/.024)**2-((z-1.610)/.024)**2)
-        v.co.y-=.004*cheek;v.co.x*=1.+.045*cheek
-    if y<-.145 and abs(x)<.05 and 1.55<z<1.60:
-        v.co.z+=.0065*min(1.,abs(x)/.024)*math.exp(-((z-1.575)/.018)**2)
+# Retain the adult MakeHuman nose, jaw and neutral mouth; no cartoon face warp.
 subdivide(body,1)
 mod=body.modifiers.new('Baked efficient sculpt topology','DECIMATE');mod.ratio=.56;mod.use_collapse_triangulate=True;bake(body,mod)
 body.data.materials.append(lips)
 # Lip pigment is restricted to the actual vermilion rings, below the nose.
+face_shift = joint('eye.L').z - 1.6487
 for poly in body.data.polygons:
     c = poly.center; edge = max(0.,1.-(abs(c.x)/.029)**2)
-    if c.y < -.151 and 1.571- .001*edge < c.z < 1.574 + .009*edge and abs(c.x)<.029:
+    if c.y < -.151 and 1.571+face_shift-.001*edge < c.z < 1.574+face_shift+.007*edge and abs(c.x)<.029:
         poly.material_index=1
 
 # Expression shapes are built on the final exported topology.
@@ -289,7 +280,7 @@ def clipped_source(name, faces, mat, fields, inflate):
     return obj
 shirtfields=[lambda p:p.z-1.080,lambda p:1.491-p.z,lambda p:max(.236-abs(p.x),.148-sleeve_distance(p)),lambda p:max(p.y+.056,abs(p.x)-max(0.,(p.z-1.438)*.47))]
 tee=clipped_source('Performance_Polo',groups['helper-tights'],shirtmat,shirtfields,.013)
-pants=clipped_source('Tailored_Shorts',groups['helper-tights'],shortmat,[lambda p:p.z-.805,lambda p:1.087-p.z],.038)
+pants=clipped_source('Tailored_Shorts',groups['helper-tights'],shortmat,[lambda p:p.z-.745,lambda p:1.087-p.z],.018)
 # The kit has a readable original identity at the broadcast distance: an angled
 # shoulder yoke, bounded sleeve cuffs and a side inset rather than tiny decoration.
 # Clip actual fabric triangles for clean panel borders instead of recoloring
@@ -312,7 +303,7 @@ for v in tee.data.vertices:
     if p.z<1.30 and abs(p.x)<.20:
         fade=max(0.,1.-abs(p.z-1.15)/.13);p.y+=math.sin(p.z*102+abs(p.x)*23)*.0019*fade
 for v in pants.data.vertices:
-    p=v.co;fade=max(0.,min(1.,(1.07-p.z)/.12))*max(0.,min(1.,(p.z-.805)/.06))
+    p=v.co;fade=max(0.,min(1.,(1.07-p.z)/.12))*max(0.,min(1.,(p.z-.745)/.06))
     p.y+=math.sin(p.z*61+abs(p.x)*19)*.0024*fade
 
 # Smooth skinned accessories have baked placement and compact material batches.
@@ -343,18 +334,20 @@ for side in ['.L','.R']:
     for v in eye.data.vertices:
         delta=v.co-p;v.co=p+Vector((delta.x,delta.y*.986,delta.z));v.co.y+=.0025
     subdivide(eye,1)
-    location=Vector((p.x,-.1557,1.6487))
-    sphere('Iris'+side,location,(.0080,.0010,.0080),iris,segments=24,rings=12)
-    sphere('Pupil'+side,location+Vector((0,-.0010,0)),(.0036,.0007,.0039),pupil,segments=20,rings=10)
+    # The macro body targets move the eye sockets. Derive the iris from the
+    # actual globe instead of the old character's hard-coded face coordinates.
+    location=Vector((p.x,min(v.co.y for v in eye.data.vertices)-.0007,p.z))
+    sphere('Iris'+side,location,(.0062,.0010,.0062),iris,segments=24,rings=12)
+    sphere('Pupil'+side,location+Vector((0,-.0010,0)),(.0027,.0007,.0029),pupil,segments=20,rings=10)
     sphere('Catchlight'+side,location+Vector((-.0020,-.00165,.0022)),(.0011,.0004,.0011),white,segments=12,rings=8)
     lid=sphere('Blink lid'+side,location+Vector((0,-.004,0)),(.023,.0065,.014),skin,segments=24,rings=12)
     blink_lids.append(lid)
-    browpoints=[front_surface(sign*x,z,.0018) for x,z in [( .018,1.671),(.031,1.675),(.047,1.674),(.057,1.670)]]
-    tube('Brow'+side,browpoints,.0024,hair)
+    browpoints=[front_surface(p.x+sign*dx,p.z+dz,.0018) for dx,dz in [(-.018,.021),(-.006,.025),(.009,.024),(.021,.020)]]
+    tube('Brow'+side,browpoints,.0016,hair)
 
-# A restrained sculpted smile line reads from the broadcast camera. It is
-# skinned and morphed together with the mouth, not a floating face decal.
-tube('MouthOutline',[front_surface(x,1.575+.0065*(abs(x)/.028)**1.8,.0016) for x in [-.028,-.021,-.014,-.007,0,.007,.014,.021,.028]],.00135,mouth)
+# A fine neutral lip crease follows the current face, rather than the old
+# stylized mouth coordinates. Keep its pigment subtle at close range.
+tube('MouthOutline',[front_surface(x,1.575+face_shift+.0015*(abs(x)/.028)**1.8,.0008) for x in [-.028,-.021,-.014,-.007,0,.007,.014,.021,.028]],.0006,mouth)
 
 # A folded polo collar and a narrow placket are supported by real fabric geometry.
 neckloop=max(garment_boundaries['Performance_Polo'],key=lambda loop:sum(p.z for p in loop)/len(loop))
@@ -413,7 +406,7 @@ def boundary_loops(obj):
 pants_bvh=BVHTree.FromPolygons([v.co for v in pants.data.vertices],[list(p.vertices)for p in pants.data.polygons])
 for sign in [-1,1]:
     points=[]
-    for z in [1.054,1.000,.943,.878,.830]:
+    for z in [1.054,1.000,.943,.878,.810,.770]:
         p,n,_,_=pants_bvh.ray_cast(Vector((sign*.5,.020,z)),Vector((-sign,0,0)),.5)
         if p is not None:points.append(p+n*.0007)
     tube('Shorts side piping',points,.0014,accent,'hips',1)
@@ -439,7 +432,7 @@ for side in ['.L','.R']:
         for i in range(len(ys)-1):
             for j in range(segments):a=i*segments+j;b=i*segments+(j+1)%segments;faces.append((a,b,b+segments,a+segments))
         faces.append(tuple(range(segments-1,-1,-1)));faces.append(tuple((len(ys)-1)*segments+j for j in range(segments)))
-        obj=mesh(name,vs,faces,mat,'foot'+side);subdivide(obj,1);return obj
+        obj=mesh(name,vs,faces,mat,'foot'+side);recalc(obj);subdivide(obj,1);return obj
     ys=[-.225,-.212,-.187,-.135,-.065,.005,.065,.086,.092]
     widths=[.009,.036,.054,.061,.053,.044,.038,.025,.008]
     shoe_loft('Court outsole'+side,ys,widths,[.062]*len(ys),.028,sole)
@@ -656,20 +649,20 @@ def athletic_volume(p,ww):
             a=positions[name];axis=limb_ends[name]-a;length=axis.length;axis.normalize()
             along=(p-a).dot(axis);t=max(0.,min(1.,along/length))
             radial=p-a-axis*along
-            if name.startswith('arm'):factor=1.16+.20*math.sin(math.pi*t)
-            elif name.startswith('forearm'):factor=1.13+.27*math.sin(math.pi*t)
-            elif name.startswith('thigh'):factor=1.17+.17*math.sin(math.pi*t)
-            else:factor=1.15+.27*math.sin(math.pi*t)**1.4
+            if name.startswith('arm'):factor=1.02+.10*math.sin(math.pi*t)
+            elif name.startswith('forearm'):factor=1.02+.08*math.sin(math.pi*t)
+            elif name.startswith('thigh'):factor=1.04+.10*math.sin(math.pi*t)
+            else:factor=1.02+.10*math.sin(math.pi*t)**1.4
             q=a+axis*along+radial*factor
         elif name in ['hips','spine']:
             # Broad soft torso/seat rather than a pinched mannequin waist.
             anchor=positions[name];mask=max(0.,min(1.,(1.49-p.z)/.10))
-            q.x*=1.+(.12 if name=='hips' else .11)*mask
-            q.y=anchor.y+(p.y-anchor.y)*(1.+.12*mask)
+            q.x*=1.+(.045 if name=='hips' else .07)*mask
+            q.y=anchor.y+(p.y-anchor.y)*(1.+.055*mask)
         elif name.startswith('foot'):
             # Court shoes have a wide stable base and a proper toe box.
-            anchor=positions[name];q.x=anchor.x+(p.x-anchor.x)*1.20
-            q.y=anchor.y+(p.y-anchor.y)*1.11
+            anchor=positions[name];q.x=anchor.x+(p.x-anchor.x)*1.08
+            q.y=anchor.y+(p.y-anchor.y)*1.05
         result+=q*w;total+=w
     return result/total if total else p
 for obj in bpy.context.scene.objects:
@@ -706,36 +699,8 @@ if accent_details:
         hit,normal,_,distance=short_bvh.find_nearest(vertex.co)
         if hit is not None and distance<.070:vertex.co=hit+normal*.003
     accent_details.data.update()
-# Premium playful sports proportions: enlarged rounded head, with a soft neck transition.
+# The converter removes this legacy interchange scale to restore adult anatomy.
 head_anchor=positions['head'].copy()
-def appealing_face(p):
-    q=p.copy();x,y,z=p
-    # Round the jaw/chin, soften the cheek planes and shorten the anatomical nose.
-    if 1.526<z<1.636:
-        jaw=math.exp(-((z-1.570)/.039)**2)
-        q.x*=1.+.32*jaw
-        if y<-.075:q.z+=.011*math.exp(-((z-1.538)/.022)**2)
-        if y<-.10:
-            cheek=math.exp(-((abs(x)-.043)/.035)**2-((z-1.615)/.027)**2)
-            q.y-=.004*cheek
-    if y<-.143 and 1.594<z<1.636:
-        nose=math.exp(-(x/.021)**2-((z-1.613)/.022)**2)
-        q.y+=max(0.,-y-.147)*.33*nose
-    if y<-.145 and 1.555<z<1.597 and abs(x)<.052:
-        mouth=math.exp(-((z-1.575)/.015)**2-(x/.038)**4)
-        q.y+=max(0.,-y-.150)*.36*mouth
-        q.z+=(1.575-z)*.20*mouth
-    # Enlarge the almond eyelids and the actual globes together about fixed centers.
-    # The eye/glasses attachment landmarks intentionally do not move.
-    if y<-.122:
-        for sign in [-1,1]:
-            center=Vector((joint('eye.L').x*sign,-.1557,1.6487))
-            dx=(x-center.x)/.033;dz=(z-center.z)/.026
-            if abs(dx)<1.5 and abs(dz)<1.45:
-                influence=math.exp(-dx*dx*.80-dz*dz*.80)
-                q.x+=(x-center.x)*.22*influence
-                q.z+=(z-center.z)*.22*influence
-    return q
 def playful_head(p,weight=1.):
     p=p.copy()  # Retain anatomical jaw, cheek planes and adult eye proportions.
     t=max(0.,min(1.,(p.z-1.49)/.10));t=t*t*(3.-2.*t)*weight
@@ -761,7 +726,7 @@ for obj in bpy.context.scene.objects:
 # Machine-readable landmarks keep the creator cameras, frames and attachments aligned.
 def godot(p):return [round(p.x,6),round(p.z,6),round(-p.y,6)]
 eye_center=playful_head(Vector((joint('eye.L').x,-.1557,1.6487)))
-landmarks={'head_bone_global':godot(head_anchor),'eye_center_L_global':godot(eye_center),'eye_center_R_global':godot(Vector((-eye_center.x,eye_center.y,eye_center.z))),'eye_radius_horizontal':.039,'head_top':round(max(v.co.z for o in bpy.context.scene.objects if o.type=='MESH' and o.name.startswith('Hair') for v in o.data.vertices),6),'glasses_center_L_local':[round(eye_center.x,6),round(eye_center.z-head_anchor.z,6),round(-eye_center.y+head_anchor.y+.016,6)],'glasses_lens_radius':.0375,'brow_height_global':round(playful_head(Vector((0,-.15,1.675))).z,6),'style':'Rounded expressive athlete, shaped athletic limbs and original color-block court kit'}
+landmarks={'head_bone_global':godot(head_anchor),'eye_center_L_global':godot(eye_center),'eye_center_R_global':godot(Vector((-eye_center.x,eye_center.y,eye_center.z))),'eye_radius_horizontal':.039,'head_top':round(max(v.co.z for o in bpy.context.scene.objects if o.type=='MESH' and o.name.startswith('Hair') for v in o.data.vertices),6),'glasses_center_L_local':[round(eye_center.x,6),round(eye_center.z-head_anchor.z,6),round(-eye_center.y+head_anchor.y+.016,6)],'glasses_lens_radius':.0375,'brow_height_global':round(playful_head(Vector((0,-.15,1.675))).z,6),'style':'Adult athletic anatomy, neutral facial proportions and original basketball kit'}
 (OUT/'Athlete.landmarks.json').write_text(json.dumps(landmarks,indent=2)+'\n')
 # Preserve a separate animated support-hand grip for two-handed backhands.
 import importlib.util

@@ -5,12 +5,24 @@ export class Audio {
     try {
       if (this.ctx) { this.ctx.resume().catch(() => {}); return; }
       const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
-      this.ctx = new AC(); this.master = this.ctx.createGain(); this.master.gain.value = this.enabled ? 0.55 : 0; this.master.connect(this.ctx.destination);
-      this.noise = this.ctx.createBuffer(1, this.ctx.sampleRate * 2, this.ctx.sampleRate);
-      const d = this.noise.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      this.setup(new AC());
     } catch {}
   }
-  setEnabled(on) { this.enabled = on; if (this.master) this.master.gain.setTargetAtTime(on ? 0.55 : 0, this.ctx.currentTime, 0.05); }
+  setup(context) {
+    this.ctx = context; this.master = context.createGain(); this.master.gain.value = this.enabled ? 0.78 : 0;
+    const limiter = context.createDynamicsCompressor(); limiter.threshold.value = -9; limiter.knee.value = 9; limiter.ratio.value = 5; limiter.connect(context.destination);
+    this.master.connect(limiter);
+    // Short, filtered early reflections give the hardwood court an enclosed
+    // room sound without washing out a release or a defender's steal.
+    for (const [seconds, level] of [[0.065, 0.16], [0.113, 0.10], [0.187, 0.055]]) {
+      const delay = context.createDelay(0.3), filter = context.createBiquadFilter(), gain = context.createGain();
+      delay.delayTime.value = seconds; filter.type = 'lowpass'; filter.frequency.value = 2400; gain.gain.value = level;
+      this.master.connect(delay).connect(filter).connect(gain).connect(limiter);
+    }
+    this.noise = context.createBuffer(1, context.sampleRate * 2, context.sampleRate);
+    const d = this.noise.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  }
+  setEnabled(on) { this.enabled = on; if (this.master) this.master.gain.setTargetAtTime(on ? 0.78 : 0, this.ctx.currentTime, 0.05); }
   tone(freq, duration, gain = 0.1, type = 'sine', delay = 0, end = freq) {
     if (!this.ctx || !this.enabled) return;
     const t = this.ctx.currentTime + delay, o = this.ctx.createOscillator(), g = this.ctx.createGain();

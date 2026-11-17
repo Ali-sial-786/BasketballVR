@@ -1,6 +1,6 @@
 # RIMRUN VR
 
-**All heart. All hoops.** A first-person, arcade half-court basketball game for Quest Browser, desktop and touch screens. Built in BasketballVR using the controller, animation and physics lessons from [Crease VR](https://github.com/Ali-sial-786/Cricket).
+**All heart. All hoops.** A first-person, arcade half-court basketball game in an indoor arena for Quest Browser, desktop and touch screens. Built in BasketballVR using the controller, animation and physics lessons from [Crease VR](https://github.com/Ali-sial-786/Cricket).
 
 ## Play
 
@@ -9,7 +9,7 @@ npm ci
 npm run dev
 ```
 
-Open **http://localhost:5173**. Click a mode and **Let’s run it**. The mouse is captured when the game starts; `Esc` or `M` pauses. In Quest Browser, open the hosted **HTTPS** URL and select **Play in VR**. A laptop’s plain HTTP LAN address does not provide immersive WebXR on Quest.
+Open **http://localhost:5173**. Click a mode and **Let’s run it**. Choose **Watch Gameplay** for an AI demo with a courtside camera; switch between 1v1, 2v2 and the three-point contest, or **Take Control** at any time. The mouse is captured when the game starts; `Esc` or `M` pauses. In Quest Browser, open the hosted **HTTPS** URL and select **Play in VR**. A laptop’s plain HTTP LAN address does not provide immersive WebXR on Quest.
 
 ```sh
 npm test          # Physics, match rules, complete AI games, tracking and real athlete rig
@@ -27,7 +27,7 @@ The smoke runner uses `/usr/bin/chromium` by default. Set `CHROMIUM_PATH` for an
 | **1v1 / Iso Ball** | You against an AI opponent. First to 11, win by 2, cap 21; 2s and 3s; 18-second clock. |
 | **2v2 / Run Together** | You and AI teammate Jax against Nova and Ace. Pass, cut, call for the ball, defend your matchup. Same scoring. |
 | **3PT / Make It Rain** | Five racks, five balls each, 70 seconds. Last ball of every rack is worth 2; the entire middle rack is worth 2. Maximum **34**. A release before the buzzer counts. Personal best is saved on this device. |
-| **Shootaround** | No opponent or time limit. Automatic ball return, release feedback, handles and close-range jump dunks. |
+| **Shootaround** | No opponent or time limit. Automatic ball return, release feedback, handles and close-range layups and jump dunks. |
 
 After a basket, the other team checks the ball. After a defensive rebound or steal, the new offense must **clear beyond the three-point line**. Passes travel through the world and can be intercepted. Blocks, rebounds, rim bounces and the backboard use the actual ball position. Offline AI play is implemented; network multiplayer is not included.
 
@@ -36,7 +36,7 @@ After a basket, the other team checks the ball. After a defensive rebound or ste
 | Input | Action |
 | --- | --- |
 | **WASD / arrows**, mouse | Move and look. **Shift** sprints. |
-| **Hold left mouse → release** | Gather and shoot. Release on the green band, facing the basket. |
+| **Hold left mouse → release** | Gather and shoot. Release on the green band, facing the basket. Jump shots rise automatically on desktop/touch; set your feet for accuracy. |
 | **Q / E / R / C** | Crossover / behind the back / spin / stepback. Chain moves to create space. |
 | **Space** | Jump to block or rebound. Jump and shoot close to the basket to dunk. |
 | **F / right mouse** | Reach for a steal. Exposed low dribbles are vulnerable; gathered balls are protected. |
@@ -69,11 +69,23 @@ Use controller straps and a clear boundary. You can stay physically in one place
 ## Feel and presentation
 
 - Three difficulty levels adjust shooting assistance, release windows and AI. Real aiming, timing, pressure and shot form still matter.
-- Dribble moves cost stamina and briefly protect the ball. Poorly timed defensive reaches leave the defender vulnerable; move chains can stagger them.
+- Movement accelerates and brakes smoothly. Crossovers, wraps, spins and stepbacks have timed travel, low ball transfers and stamina costs. Feet plant during cuts and defensive slides; moves briefly protect the ball. Poorly timed defensive reaches leave the defender vulnerable; move chains can stagger them.
 - Five heat points trigger a 14-second hot streak with a wider release window. Perfect makes build heat faster.
-- Human-proportioned, smooth-skinned athletes, full anatomical hands/fingers, faces, modeled hair and footwear, sleeveless jerseys and shorts. Approximately **47k triangles** close up; a separate **9k** distant mesh is included. Four player heights, skin tones and kit numbers, plus detailed spectators.
+- Human-proportioned, smooth-skinned athletes, full anatomical hands/fingers, faces, modeled hair and footwear, sleeveless jerseys and shorts. Approximately **56k triangles** close up; a separate **9k** distant mesh is included. Four player heights, skin tones and kit numbers, plus detailed sideline spectators and an instanced seated crowd. Skin and fabric have distinct physically based shading.
 - The supplied **Mixamo `Dribble _2_.fbx`** is retargeted onto the 17-bone athlete rig. Its 2.1-second take supplies the dribbling weight shift and arm motion; inverse kinematics fits the hands to the live ball. Walking, running and defense blend from Crease VR’s retargeted Quaternius clips.
-- Sunset court, city skyline, palms, chain-link fence, physical scoreboard, animated net, ball trails, particles, haptics and original synthesized court sounds.
+- The Fieldhouse indoor arena: full hardwood venue, both baskets, tiered seating, steel roof trusses, arena lights, LED ribbons, live four-face jumbotron and a physical courtside scoreboard. Only the near half-court is active for pickup games. A deforming net, ball backspin, restrained trails, haptics and original synthesized sounds with room reflections complete the presentation.
+
+## Gameplay recordings and references
+
+The footage review and specific movement/presentation decisions are documented in [REFERENCE_NOTES.md](REFERENCE_NOTES.md). References include USA Basketball coaching footage, NBA 2K25 and NBA Playgrounds 2 trailers, and Wii Sports Resort basketball footage. No reference video or commercial assets ship with the game.
+
+`npm run record:demo` records an actual browser session to `RIMRUN-improved.mp4`, including the game’s synthesized sounds. It needs Chromium and ffmpeg, plus a running dev or preview server. It scripts inputs and changes camera/modes; it never forces scores. For example:
+
+```sh
+CAPTURE_URL=http://127.0.0.1:4173 CAPTURE_OUTPUT=./test-results npm run record:demo
+```
+
+The outdoor baseline was recorded from `fef750d` before the arena, anatomy, movement and mechanics pass.
 
 ## Where to adjust things
 
@@ -85,7 +97,9 @@ Use controller straps and a clear boundary. You can stay physically in one place
 | `src/input/` | Keyboard/touch/XR input, real-time reference-space motion history and gesture recognition. |
 | `src/render/athletes.js` | Basketball poses, motion blending and hand/foot IK. |
 | `src/render/humanoid.js`, `clips.js` | Athlete skinning, LODs, IK and animation playback adapted from Crease VR. |
-| `src/render/court.js` | Court art, scene props, physical scoreboard and static mesh batching. |
+| `src/render/arena.js` | Indoor venue, hardwood, lighting, crowd, scoreboards and static mesh batching. |
+| `src/game/movement.js`, `src/render/footwork.js` | Acceleration, move timing/ball paths and planted foot IK. |
+| `src/game/demo.js` | Contest demo commands; spectator pickup uses normal match AI. |
 | `src/xr/` | Session lifecycle, comfort preferences, world-space menu and headset HUD. |
 | `src/ui.js`, `src/style.css` | Desktop menu, HUD, results and help. |
 

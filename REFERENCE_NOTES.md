@@ -1,0 +1,17 @@
+# Basketball footage review and implementation targets
+
+Reviewed on 2026-11-17. The review used publicly available video streams, sequential frame sampling, and closer frame-by-frame sections for movement. These are visual references, not motion-capture data or a claim of hands-on testing of the commercial games.
+
+| Reference | Sections inspected | Observations and resulting changes |
+| --- | --- | --- |
+| [USA Basketball — Dribbling on the Move: Crossover Dribble](https://www.usab.com/videos/2022/04/dribbling-on-the-move-crossover-dribble) | 00:18–00:29; especially 00:21.5–00:28.5 | Lower the hips before the direction change. Keep the transfer below the waist, plant the outside foot, then push past the defender. Replace position jumps with a timed plant/push/recovery and an actual ball transfer path. |
+| [USA Basketball — Proper Defensive Stance](https://www.usab.com/videos/2017/12/proper-defensive-stance) | 00:12–00:42 | Wide base, bent knees, torso above the feet, a lateral lead step followed by recovery. Use lateral foot planting and acceleration limits rather than a forward running animation on a defender sliding sideways. |
+| [NBA 2K25 — Official Gameplay Trailer, GameSpot](https://www.gamespot.com/videos/nba-2k25-official-gameplay-trailer/2300-6464732/) | 00:17–00:30, 00:32–00:44, 00:48–01:20 | The trailer contains edited replay-style views. Useful visual references: distinct plant/push-off, the body turning with a drive, dribble-to-gather transitions, off-hand separation on release, and close finishes. Arena references: bright hardwood, controlled overhead light, darker seating, fabric/skin material separation. |
+| [NBA Playgrounds 2 — Official Gameplay Trailer, GameSpot](https://www.gamespot.com/videos/nba-playgrounds-2-official-gameplay-trailer/2300-6443891/) | 00:03–00:09, 00:23–00:29, 00:38–00:43 | Readable spacing, immediate feedback and clearly distinct move silhouettes. Preserve accessible arcade controls, but keep the new adult anatomy and smooth movement. Do not use its exaggerated head/body proportions. |
+| [Wii Sports Resort — Video Review, GameSpot](https://www.gamespot.com/videos/wii-sports-resort-video-review/2300-6213871/) | Basketball at about 03:58–04:06 | Clear gather/shot phases, an obvious pass target, and little button complexity. Keep one primary shooting action and contextual defense/pass actions. |
+
+The original YouTube sources were unavailable to this environment; public publisher/coaching streams were used instead. Reference media stays outside the repository and is not included in the game or demo recordings. RIMRUN retains its original art, generated venue, synthesized sounds and the user-provided Mixamo dribble animation.
+
+The outdoor demo is captured from commit `fef750d` before the improvement pass. The updated recording uses the same match simulation and scoring as the playable build. Camera direction and player commands can be scripted for capture; baskets and match outcomes are not forced.
+
+Implemented in this pass: adult anatomical head/jaw proportions and athletic limb shapes, 56k-triangle close models with distinct skin/fabric shading, acceleration and braking, timed move travel and low transfer paths, world-planted foot IK, asymmetric defensive hands, automatic desktop/touch shot lift, contextual layups, a movement accuracy penalty, committed AI drives and passing lanes, predictive rebounding, and The Fieldhouse indoor arena. The Watch Gameplay view uses normal AI matches, offers 1v1/2v2/3PT switching, and can hand control to the player.

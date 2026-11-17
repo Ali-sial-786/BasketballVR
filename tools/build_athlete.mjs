@@ -7,8 +7,8 @@
 //
 // What it does to the source (all offline, so the game only loads the result):
 //  * Proportions: undoes Courtside's enlarged cartoon head (the exact inverse
-//    of its `playful_head` warp, keeping the friendlier face), then gives the
-//    head back a mild sporty enlargement; lengthens the upper arm and forearm
+//    of its `playful_head` interchange scale, retaining adult facial anatomy),
+//    fits an athletic head/body ratio; lengthens the upper arm and forearm
 //    (joints and skin together) to adult proportions.
 //  * Hands: a relaxed, slightly curled hand from the source's grip morphs.
 //  * Basketball kit: exact armhole/neckline clipping for a bound sleeveless
@@ -20,7 +20,7 @@
 // Per-vertex data: position f32x3, normal i8x3 + kit i8, colour u8x3 + AO u8,
 // joints u8x4, weights u8x4; indices u16.
 // Kit slots: 0 fixed colour, 1 shirt, 2 trim, 3 headgear, 4 trousers, 5 skin,
-// 6 hair, 7 shirt panel, 8 lips (a darker skin), 10..23 back-number segments (trim when lit, else shirt).
+// 6 hair, 7 shirt panel, 8 lips, 9 eyes, 10..23 back-number segments.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -85,8 +85,8 @@ const si = Object.fromEntries(SRC.map((n, i) => [n, i]));
 
 // ------------------------------------------------------------------ tunables
 const HEAD_ANCHOR = SJ.head.slice();           // Courtside's playful_head pivot (neck01 joint)
-const HEAD_K = 0.99;                           // sporty head, ~1.2x life once the body is life size
-const ARM_UPPER = 1.22, ARM_FORE = 1.04;       // adult limb proportions (MakeHuman's upper arm is short)
+const HEAD_K = 0.92;                           // sporty head, ~1.2x life once the body is life size
+const ARM_UPPER = 1.18, ARM_FORE = 1.04;       // adult limb proportions (MakeHuman's upper arm is short)
 const RELAX = 0.34;                            // grip morph amount for a relaxed, curled hand
 
 // Inverse of Courtside's playful_head scale (Blender Z-up -> glTF Y-up:
@@ -103,7 +103,7 @@ function unHead(q, w) {
   const s = [1 / (1 + 0.93 * t), 1 / (1 + 0.65 * t), 1 / (1 + 0.57 * t)];
   return { p: [a[0] + (q[0] - a[0]) * s[0], y, a[2] + (q[2] - a[2]) * s[2]], s };
 }
-// Then a mild uniform enlargement, blended in over the same neck band.
+// Fit an adult athletic head/body ratio, blended over the same neck band.
 function reHead(p, w) {
   const t = headT(p[1], w), k = 1 + (HEAD_K - 1) * t, a = HEAD_ANCHOR;
   return [a[0] + (p[0] - a[0]) * k, a[1] + (p[1] - a[1]) * k, a[2] + (p[2] - a[2]) * k];
@@ -136,7 +136,7 @@ function armMove(p, w) {        // w: Float32Array(NS) weights
 
 // ------------------------------------------------------------------ parts
 // A part: { name, pos[], nrm[], w Float32Array(V*NS), kit[], col[], idx[] }
-const KIT = { fixed: 0, shirt: 1, trim: 2, headgear: 3, trousers: 4, skin: 5, hair: 6, panel: 7, lips: 8, number: 10 };
+const KIT = { fixed: 0, shirt: 1, trim: 2, headgear: 3, trousers: 4, skin: 5, hair: 6, panel: 7, lips: 8, eyes: 9, number: 10 };
 const matColor = (m) => gltf.materials[m].pbrMetallicRoughness.baseColorFactor.slice(0, 3).map((c) => Math.pow(c, 1 / 2.2));
 const MORPH = { HandGrip: RELAX, SupportGrip: RELAX };
 
@@ -298,7 +298,7 @@ function clipField(part, field) {
 // ------------------------------------------------------------------ source parts
 const legW = (w) => w[si['thigh.L']] + w[si['thigh.R']] + w[si['shin.L']] + w[si['shin.R']];
 const body = loadMesh('Athlete_Body', (p, mat) => (mat === 'Lips' ? KIT.lips : KIT.skin),
-  null);  // Full anatomy under the sleeveless basketball kit.
+  c => c[1] > 0.285);  // Complete exposed anatomy; feet/shins inside socks and shoes are concealed.
 // Keep authored shoes and socks, excluding the source eye glints.
 const shoes = loadMesh('Details_Shoe', () => KIT.fixed, (c) => c[1] < 0.5);
 const sole = loadMesh('Details_Sole', () => KIT.fixed);
@@ -315,9 +315,9 @@ for (let v = 0; v < shirtBits.kit.length; v++) if (shirtBits.kit[v] === KIT.fixe
 // cuffs, crest and shorts insets are replaced by panels painted into the cloth.
 const accents = loadMesh('Details_Accent', () => KIT.trim, (c) => c[1] < 0.5);
 const brows = loadMesh('Details_Hair', () => KIT.hair);
-const sclera = loadMesh('Details_Sclera', () => KIT.fixed);
-const iris = loadMesh('Details_Iris', () => KIT.fixed);
-const pupil = loadMesh('Details_Pupil', () => KIT.fixed);
+const sclera = loadMesh('Details_Sclera', () => KIT.eyes);
+const iris = loadMesh('Details_Iris', () => KIT.eyes);
+const pupil = loadMesh('Details_Pupil', () => KIT.eyes);
 const mouth = loadMesh('Details_Mouth', () => KIT.fixed);
 const hairCap = loadMesh('HairCap', () => KIT.hair);
 const hairStyle = loadMesh('Hair_0', () => KIT.hair);
@@ -466,7 +466,7 @@ function simplify(part, target, opts = {}) {
 
 // ------------------------------------------------------------------ plan
 const PLAN = [ // part, LOD0 tris, LOD1 tris (0 = dropped), opts
-  [body, 27500, 5000, { lockBorder: true }],
+  [body, 36500, 5000, { lockBorder: true }],
   [polo, 6500, 1500, { lockBorder: true }],
   [trousers, 4500, 1000, {}],
   [shoes, 2200, 260, {}],

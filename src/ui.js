@@ -11,6 +11,10 @@ export class UI {
     for (const b of document.querySelectorAll('[data-mode]')) b.addEventListener('click', () => { this.selectMode(b.dataset.mode); hooks.uiSound(); });
     for (const b of document.querySelectorAll('[data-difficulty]')) b.addEventListener('click', () => { settings.difficulty = b.dataset.difficulty; this.syncSettings(); hooks.uiSound(); });
     $('play').addEventListener('click', () => hooks.play(this.mode));
+    $('watch-demo').addEventListener('click', () => hooks.demo(this.mode));
+    for (const b of document.querySelectorAll('[data-demo-mode]')) b.addEventListener('click', () => hooks.demo(b.dataset.demoMode));
+    $('take-control').addEventListener('click', () => hooks.takeControl());
+    $('exit-demo').addEventListener('click', () => hooks.home());
     $('enter-vr').addEventListener('click', () => hooks.xr());
     $('home').addEventListener('click', () => { if (engine.phase === 'playing') hooks.pause(); });
     $('pause').addEventListener('click', () => hooks.pause());
@@ -39,6 +43,10 @@ export class UI {
   }
   updateBest() { const best = loadBest(); $('personal-best').textContent = best ? `3PT PERSONAL BEST / ${best} POINTS` : 'FIVE RACKS. ONE HOT HAND.'; }
   setPlaying(on) { document.body.classList.toggle('playing', on); $('hud').hidden = !on; $('menu').hidden = on; }
+  setDemo(on, mode) {
+    this.demo = on; document.body.classList.toggle('is-demo', on); $('demo-controls').hidden = !on;
+    for (const b of document.querySelectorAll('[data-demo-mode]')) b.setAttribute('aria-pressed', String(b.dataset.demoMode === mode));
+  }
   closeForAction() { this.resumeOnClose = false; this.ignoreClose = this.dialog.open; if (this.dialog.open) this.dialog.close(); }
   open(content, resume = false) {
     this.content.innerHTML = content; this.resumeOnClose = resume;
@@ -50,7 +58,7 @@ export class UI {
     const resume = this.prepareDialog() || this.resumeOnClose;
     const desktop = [
       ['W A S D / arrows', 'Move. Mouse to look. Hold Shift to sprint. Click the court to capture your mouse.'],
-      ['Hold / release LMB', 'Gather, then release on the green band. Face the hoop. Jump near the rim to dunk.'],
+      ['Hold / release LMB', 'Gather, then release on the green band. Desktop and touch shots jump automatically. Set your feet for accuracy. Drive and jump near the rim for a layup or dunk.'],
       ['Q / E / R / C', 'Crossover / behind the back / spin / stepback. Chain moves to create space; watch your stamina.'],
       ['Space / F', 'Jump to block or rebound. F or right-click to steal an exposed dribble. Hold Ctrl for a defensive stance.'],
       ['X', 'Pass in 2v2. Press again when Jax has it to call for the ball. Passes can be intercepted.'],
@@ -84,7 +92,7 @@ export class UI {
     const e = this.engine, s = e.stats, contest = e.mode === 'contest', won = e.score[0] > e.score[1];
     let best = 0; if (contest) best = saveBest(e.score[0]); this.updateBest();
     const racks = contest ? `<div class="result-racks">${RACKS.map((r, ri) => `<div class="result-rack ${ri === 2 ? 'money' : ''}"><span>${['L CORNER', 'L WING', 'MONEY RACK', 'R WING', 'R CORNER'][ri]}</span><div>${e.contestResults.slice(ri * 5, ri * 5 + 5).map(r => r ? r.made ? '●' : '×' : '·').join('')}</div></div>`).join('')}</div>` : '';
-    this.open(`<div class="eyebrow">${contest ? `THREE-POINT CONTEST / BEST ${best}` : 'FINAL / SUNSET PARK'}</div><h2>${contest ? e.score[0] >= 24 ? 'Certified sniper.' : 'Nice range.' : won ? 'Court is yours.' : 'Run it back.'}</h2><div class="result-score"><strong>${e.score[0]}</strong><span>${contest ? '/ 34 POINTS' : '—'}</span>${contest ? '' : `<strong>${e.score[1]}</strong>`}</div>${racks}<div class="result-stats">${stat(`${s.made}/${s.attempts}`, 'SHOOTING')}${stat(s.attempts ? percent(s.made / s.attempts) : '0%', 'FIELD GOAL %')}${stat(contest ? s.threes : s.assists, contest ? 'THREES MADE' : 'ASSISTS')}${contest ? '' : stat(s.steals, 'STEALS') + stat(s.blocks, 'BLOCKS') + stat(s.bestCombo, 'BEST COMBO')}</div><button id="play-again" class="primary">RUN IT BACK <span>↗</span></button><button id="result-home" class="secondary">BACK TO THE NEIGHBORHOOD</button>`, false);
+    this.open(`<div class="eyebrow">${contest ? `THREE-POINT CONTEST / BEST ${best}` : 'FINAL / THE FIELDHOUSE'}</div><h2>${contest ? e.score[0] >= 24 ? 'Certified sniper.' : 'Nice range.' : won ? 'Court is yours.' : 'Run it back.'}</h2><div class="result-score"><strong>${e.score[0]}</strong><span>${contest ? '/ 34 POINTS' : '—'}</span>${contest ? '' : `<strong>${e.score[1]}</strong>`}</div>${racks}<div class="result-stats">${stat(`${s.made}/${s.attempts}`, 'SHOOTING')}${stat(s.attempts ? percent(s.made / s.attempts) : '0%', 'FIELD GOAL %')}${stat(contest ? s.threes : s.assists, contest ? 'THREES MADE' : 'ASSISTS')}${contest ? '' : stat(s.steals, 'STEALS') + stat(s.blocks, 'BLOCKS') + stat(s.bestCombo, 'BEST COMBO')}</div><button id="play-again" class="primary">RUN IT BACK <span>↗</span></button><button id="result-home" class="secondary">BACK TO RIMRUN ARENA</button>`, false);
     $('play-again').onclick = () => { this.closeForAction(); this.hooks.play(e.mode); };
     $('result-home').onclick = () => { this.closeForAction(); this.hooks.home(); };
   }
@@ -104,6 +112,7 @@ export class UI {
     const e = this.engine, contest = e.mode === 'contest';
     $('score-home').textContent = String(e.score[0]).padStart(2, '0'); $('score-away').textContent = contest ? String(25 - e.contestShots).padStart(2, '0') : String(e.score[1]).padStart(2, '0');
     $('home-label').textContent = contest ? 'POINTS' : e.mode === '2v2' ? 'YOUR TEAM' : 'YOU'; $('away-label').textContent = contest ? 'BALLS LEFT' : e.mode === '2v2' ? 'THEIR TEAM' : 'THEM';
+    if (this.demo && !contest) { $('home-label').textContent = 'HOME'; $('away-label').textContent = 'AWAY'; }
     $('mode-label').textContent = contest ? '3PT · FIVE RACKS' : e.mode === 'practice' ? 'SHOOTAROUND' : `${MODES[e.mode].short} · FIRST TO 11`;
     $('clock').textContent = contest ? Math.ceil(e.contestTime) : e.mode === 'practice' ? '∞' : Math.max(0, Math.ceil(e.shotClock));
     $('clock').style.color = (contest ? e.contestTime < 10 : e.shotClock < 5) ? '#ff8b6e' : '';

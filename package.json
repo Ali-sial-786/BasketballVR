@@ -3,14 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "RIMRUN — intuitive WebXR street basketball for Quest and desktop.",
+  "description": "RIMRUN \u2014 intuitive indoor arena basketball for Quest, desktop and touch.",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "serve": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "test": "node --test tests/*.test.js",
-    "test:smoke": "node tools/smoke.mjs"
+    "test:smoke": "node tools/smoke.mjs",
+    "record:demo": "node tools/capture_demo.mjs"
   },
   "dependencies": {
     "three": "0.180.0"

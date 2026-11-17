@@ -35,7 +35,7 @@ test('held and protected balls cannot be stolen, and reaching has a cooldown', (
 });
 test('dribble moves consume stamina, protect possession and can be chained', () => {
   const g = fresh('1v1'); assert(g.dribbleMove(g.human, 'cross')); assert(g.human.stamina < 100); assert(g.human.shield > 0);
-  assert(!g.dribbleMove(g.human, 'behind')); advance(g, 0.5); assert(g.dribbleMove(g.human, 'behind')); assert.equal(g.stats.bestCombo, 2);
+  assert(!g.dribbleMove(g.human, 'behind')); advance(g, 0.65); assert(g.dribbleMove(g.human, 'behind')); assert.equal(g.stats.bestCombo, 2);
   g.human.stamina = 0; advance(g, 0.5); assert(!g.dribbleMove(g.human, 'spin'));
 });
 test('a defender can intercept a real pass in flight', () => {
@@ -46,7 +46,7 @@ test('a defender can intercept a real pass in flight', () => {
 });
 test('reaching a rising shot while jumping creates a physical block', () => {
   const g = fresh('1v1'), d = g.players[1]; d.pos.set(0, 0, -2); g.giveBall(d); d.charge = 0.72;
-  g.human.pos.set(0, 0, -2.6); g.human.jump = 0.45; g.human.jumpVel = 1; g.shoot(d, { aiCharge: 0.72 });
+  g.human.pos.set(0, 0, -2.6); g.human.yaw = 0; g.human.jump = 0.45; g.human.jumpVel = 1; g.shoot(d, { aiCharge: 0.72 });
   advance(g, 0.14); assert.equal(g.stats.blocks, 1); assert.equal(g.score[1], 0);
 });
 test('shot clock and out-of-bounds hand the check to the other team', () => {

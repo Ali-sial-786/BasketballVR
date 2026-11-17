@@ -1,6 +1,7 @@
 import { Vec3, clamp } from '../physics/math.js';
 import { CONFIG, DIFFICULTIES, MODES, RACKS } from '../config.js';
 import { Basketball, makeShot, isThree } from '../physics/basketball.js';
+import { movePlayer, beginMove, advanceMove, dribbleOffset, MOVE_SPECS } from './movement.js';
 
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const teamPlayers = (players, team) => players.filter(p => p.team === team);
@@ -8,7 +9,8 @@ function athlete(id, team, name, x, z) {
   return { id, team, name, pos: new Vec3(x, 0, z), vel: new Vec3(), yaw: Math.PI,
     side: 1, stamina: 100, jump: 0, jumpVel: 0, stagger: 0, shield: 0,
     stealCooldown: 0, moveCooldown: 0, action: '', actionTime: 0, ownedFor: 0,
-    aiWait: 0, aiMove: 0, charge: 0, dribble: 0, defending: false };
+    aiWait: 0, aiMove: 0, charge: 0, dribble: 0, defending: false,
+    locoVel: new Vec3(), acceleration: new Vec3(), moveState: null, driveSide: id % 2 ? -1 : 1 };
 }
 
 // Rendering, audio and browser input never decide a score. This simulation is
@@ -47,7 +49,7 @@ export class GameEngine {
       mode === 'contest' ? '25 balls · 70 seconds · gold balls count double' : mode === 'practice' ? 'Hold to gather. Release on green.' : 'First to 11 · win by 2 · 2s and 3s');
     this.emit('recenter');
   }
-  pause() { if (this.phase === 'playing') { this.phase = 'paused'; this.charge = 0; if (this.ownerId === 0) this.ballState = 'dribble'; } }
+  pause() { if (this.phase === 'playing') { this.phase = 'paused'; this.charge = 0; if (this.ownerId === 0) this.ballState = 'dribble'; for (const p of this.players) { p.vel.set(0, 0, 0); p.locoVel.set(0, 0, 0); p.moveState = null; } } }
   resume() { if (this.phase === 'paused') this.phase = 'playing'; }
 
   step(dt, cmd = {}) {
@@ -86,6 +88,7 @@ export class GameEngine {
     }
     if (!this.preview) this.humanInput(dt, cmd);
     this.updateAI(dt);
+    for (const p of this.players) advanceMove(p, dt);
     this.separatePlayers();
     if (this.needsClear && this.owner && isThree(this.owner.pos)) {
       this.needsClear = false; this.toast('CLEARED.', 'Go get a bucket.');
@@ -110,7 +113,7 @@ export class GameEngine {
     let speed = (sprint ? CONFIG.player.sprint : CONFIG.player.speed) * (p.stagger ? 0.3 : 1) * (p.defending ? 0.7 : 1);
     if (this.ballState === 'held' && this.ownerId === 0) speed *= 0.36;
     if (this.mode === 'contest') speed = 0;
-    p.vel.copy(m).scale(speed); p.pos.addScaled(p.vel, dt);
+    movePlayer(p, m.scale(speed), dt);
     if (sprint && m.lengthSq() > 0.1) p.stamina = Math.max(0, p.stamina - 22 * dt);
     if (cmd.jump) this.jump(p);
     if (cmd.moveAction) this.dribbleMove(p, cmd.moveAction);
@@ -122,6 +125,7 @@ export class GameEngine {
     if (this.ownerId !== 0) { this.charge = 0; return; }
     if (cmd.gather && this.ballState === 'dribble') { this.ballState = 'held'; this.charge = 0; }
     if (this.ballState === 'held') this.charge = Math.min(CONFIG.shot.maxCharge, this.charge + dt);
+    if (cmd.autoJump && this.ballState === 'held' && this.charge >= 0.49 && this.charge < 0.49 + dt * 1.5) this.jump(p);
     if (cmd.release) {
       if (cmd.release.kind === 'bounce') {
         this.ballState = 'dribble'; this.charge = 0; this.dribbleImpulse = 2; this.emit('bounce', { speed: 4 });
@@ -135,14 +139,15 @@ export class GameEngine {
     const p = this.owner;
     if (!p) return;
     const oldPhase = Math.floor(p.dribble / Math.PI);
-    const cadence = 7.8 + Math.min(2.5, p.vel.length() * 0.35) + this.dribbleImpulse;
+    const cadence = 6.7 + Math.min(2.5, p.vel.length() * 0.42) + this.dribbleImpulse;
     p.dribble += dt * cadence;
     const gathered = this.ballState === 'held' || p.action === 'shooting';
     const forward = new Vec3(Math.sin(p.yaw), 0, Math.cos(p.yaw));
     const right = new Vec3(-Math.cos(p.yaw), 0, Math.sin(p.yaw));
-    const side = gathered ? 0.12 : p.side * 0.46;
-    this.ball.pos.copy(p.pos).addScaled(forward, gathered ? 0.53 : 0.28).addScaled(right, side);
-    this.ball.pos.y = p.jump + (gathered ? 1.35 + Math.min(0.65, (p.id === 0 ? this.charge : p.charge) * 0.9) : 0.13 + Math.abs(Math.sin(p.dribble)) * 0.9);
+    const offset = dribbleOffset(p);
+    const charge = p.id === 0 && !this.preview ? this.charge : p.charge;
+    this.ball.pos.copy(p.pos).addScaled(forward, gathered ? 0.48 : offset.z).addScaled(right, gathered ? p.side * 0.08 : offset.x);
+    this.ball.pos.y = p.jump + (gathered ? 1.31 + Math.min(0.7, charge * 0.96) : offset.y);
     if (p.id === 0 && this.hand && gathered) this.ball.pos.copy(this.hand);
     else if (p.id === 0 && this.hand && !gathered) {
       // Stay below the actual hand; never draw a bouncing ball through the face.
@@ -162,6 +167,7 @@ export class GameEngine {
     if (!from) origin.y = Math.max(origin.y, 1.95 + p.jump);
     // A legitimate close jump becomes an accessible one-handed dunk.
     const dunk = distance(p.pos, hoop) < 1.65 && p.jump > 0.23;
+    const layup = !dunk && distance(p.pos, hoop) < 2.65 && (p.jump > 0.08 || p.vel.length() > 1.2);
     if (dunk) origin.y = Math.max(3.35, origin.y);
     let contest = 0;
     for (const d of this.players) if (d.team !== p.team) {
@@ -169,14 +175,14 @@ export class GameEngine {
       contest = Math.max(contest, clamp(1 - gap / 2.1, 0, 1) * (d.stagger ? 0.1 : d.defending || d.jump > 0 ? 1 : 0.72));
     }
     const shot = makeShot({ from: origin, feet: p.pos, aim, charge: aiCharge ?? this.charge,
-      physicalVelocity, contest, difficulty: p.id === 0 ? this.difficulty : 'park', heat: p.team === 0 && this.heatTime > 0, rng: this.rng, dunk });
+      physicalVelocity, contest, difficulty: p.id === 0 ? this.difficulty : 'park', heat: p.team === 0 && this.heatTime > 0, rng: this.rng, dunk, layup, moving: p.locoVel.length() });
     this.shot = { ...shot, shooter: p.id, team: p.team, released: this.time, origin: origin.clone(), resolved: false,
       assist: this.lastPass && this.lastPass.to === p.id && this.time - this.lastPass.time < 4 ? this.lastPass.from : null,
       rack: this.rack, rackBall: this.rackBall, money: this.rack === CONFIG.contest.moneyRack || this.rackBall === 4 };
     this.lastShot = this.shot;
     this.ball.launch(origin, shot.vel); this.ownerId = null; this.ballState = 'flight'; this.flightAge = 0;
     this.lastTouch = p.id; this.charge = 0; this.passInfo = null;
-    p.action = dunk ? 'dunk' : 'follow'; p.actionTime = 0.8; p.charge = 0;
+    p.action = dunk ? 'dunk' : layup ? 'layup' : 'follow'; p.actionTime = 0.8; p.charge = 0; p.moveState = null;
     if (p.id === 0) { this.stats.attempts++; this.emit('shot', { shot: this.shot }); }
     return true;
   }
@@ -198,7 +204,9 @@ export class GameEngine {
         const handBlock = p.id === 0 && this.hands.some(h => h.distanceTo(this.ball.pos) < 0.36);
         if (p.team === shot.team || p.stagger || p.jump < 0.1 && !handBlock) continue;
         const gap = distance(p.pos, this.ball.pos);
-        if ((gap < 0.8 && this.ball.pos.y < 2.4 + p.jump && this.ball.pos.y > 1.5 && this.flightAge > 0.045) || handBlock) {
+        const towardBall = new Vec3(this.ball.pos.x - p.pos.x, 0, this.ball.pos.z - p.pos.z).normalize();
+        const facing = towardBall.dot(new Vec3(Math.sin(p.yaw), 0, Math.cos(p.yaw))) > -0.2;
+        if ((gap < 0.8 && facing && this.ball.pos.y < 2.4 + p.jump && this.ball.pos.y > 1.5 && this.flightAge > 0.045) || handBlock) {
           this.ball.vel.set((this.rng() - 0.5) * 4, -2.8, 3.5);
           this.ballState = 'loose'; shot.resolved = true; this.shot = null;
           this.lastTouch = p.id; this.toast('DENIED!', p.team === 0 ? 'Get that out of here.' : 'Find a little more space.', p.team === 0 ? 'good' : 'bad');
@@ -254,7 +262,7 @@ export class GameEngine {
       this.stats.points += s.value; this.stats.made++; if (s.value === 3) this.stats.threes++;
       this.heat += s.green ? 2 : 1;
       if (this.heat >= 5) { this.heatTime = 14; this.heat = 0; this.toast('ON FIRE.', 'Wider release window. Keep cooking.', 'fire'); }
-      else this.toast(s.dunk ? 'THROW IT DOWN!' : s.green ? 'PURE GREEN.' : s.value === 3 ? 'FROM DEEP.' : 'BUCKET.', `+${s.value} ${s.green ? '· Perfect release' : '· Run it back'}`, 'good');
+      else this.toast(s.dunk ? 'THROW IT DOWN!' : s.layup ? 'SOFT TOUCH.' : s.green ? 'PURE GREEN.' : s.value === 3 ? 'FROM DEEP.' : 'BUCKET.', `+${s.value} ${s.green ? '· Perfect release' : '· Run it back'}`, 'good');
     } else {
       if (s.assist === 0) this.stats.assists++;
       this.toast(s.team === 0 ? 'DIME.' : 'THEY GOT ONE.', `+${s.value} · ${s.team === 0 ? 'Good basketball.' : 'Your ball. Answer back.'}`, s.team === 0 ? 'good' : 'bad');
@@ -272,6 +280,7 @@ export class GameEngine {
     this.ownerId = p.id; this.possession = p.team; this.ballState = 'dribble';
     this.shot = null; this.passInfo = null; this.charge = 0; this.flightAge = 0;
     this.lastTouch = p.id; this.ball.scored = false; p.ownedFor = 0; p.shield = 0.45;
+    p.moveState = null;
     if (changed) { this.needsClear = this.isMatch; this.shotClock = CONFIG.match.shotClock; this.lastPass = null; this.possessionPasses = 0; }
     else if (hitRim) this.shotClock = CONFIG.match.offensiveReboundClock;
     this.updateOwnedBall(0);
@@ -283,7 +292,7 @@ export class GameEngine {
       for (const p of this.players) {
         const offence = p.team === team;
         p.pos.set(p.id % 2 ? (offence ? 4 : 3.5) : 0, 0, offence ? (p.id % 2 ? -0.4 : 1.6) : (p.id % 2 ? -2 : -0.8));
-        p.vel.set(0, 0, 0); p.jump = 0; p.jumpVel = 0; p.stagger = 0; p.yaw = p.id === 0 ? Math.PI : offence ? Math.PI : 0;
+        p.vel.set(0, 0, 0); p.locoVel.set(0, 0, 0); p.moveState = null; p.jump = 0; p.jumpVel = 0; p.stagger = 0; p.yaw = p.id === 0 ? Math.PI : offence ? Math.PI : 0;
       }
     }
     const first = teamPlayers(this.players, team)[0];
@@ -308,19 +317,15 @@ export class GameEngine {
   }
   jump(p) {
     if (p.jump > 0 || p.jumpVel > 0 || p.stamina < 8) return;
-    p.jumpVel = CONFIG.player.jumpSpeed; p.stamina -= 12; p.action = 'jump'; p.actionTime = 0.7;
+    p.jumpVel = CONFIG.player.jumpSpeed; p.stamina -= 12; if (p.action !== 'shooting') { p.action = 'jump'; p.actionTime = 0.7; }
     this.emit('jump', { player: p.id });
   }
   dribbleMove(p, kind) {
     if (this.ownerId !== p.id || this.ballState !== 'dribble' || p.moveCooldown > 0 || p.stamina < 16) return false;
     if (!['cross', 'behind', 'spin', 'stepback'].includes(kind)) return false;
-    p.moveCooldown = 0.46; p.stamina -= kind === 'spin' ? 24 : 18; p.shield = kind === 'behind' ? 0.7 : 0.44;
-    p.action = kind; p.actionTime = 0.5;
-    const f = new Vec3(Math.sin(p.yaw), 0, Math.cos(p.yaw));
-    const r = new Vec3(-Math.cos(p.yaw), 0, Math.sin(p.yaw));
-    if (kind === 'cross' || kind === 'behind') { p.side *= -1; p.pos.addScaled(r, p.side * (kind === 'cross' ? 0.65 : 0.4)); }
-    if (kind === 'stepback') p.pos.addScaled(f, -0.95);
-    if (kind === 'spin') p.pos.addScaled(f, 0.8);
+    const spec = MOVE_SPECS[kind]; if (p.stamina < spec.cost) return false;
+    p.moveCooldown = spec.duration + 0.1; p.stamina -= spec.cost; p.shield = spec.shield;
+    p.action = kind; p.actionTime = spec.duration; beginMove(p, kind);
     let broke = false;
     for (const d of this.players) if (d.team !== p.team && distance(d.pos, p.pos) < 1.9 && !d.stagger) {
       const beats = kind === 'stepback' ? distance(d.pos, p.pos) > 1.1 : (d.stealCooldown > 0.3 || distance(d.pos, p.pos) < 1.25);
@@ -378,19 +383,22 @@ export class GameEngine {
         p.yaw = Math.atan2(hoop.x - p.pos.x, hoop.z - p.pos.z);
         if (this.needsClear) target.set(p.pos.x * 0.6, 0, 1.2);
         else {
-          target.set(Math.sin(this.time * 0.8 + p.id * 2) * 2.5, 0, -3.9);
-          if (gap < 1.3) target.x += (p.pos.x >= nearest.pos.x ? 1 : -1) * 1.5;
+          // Commit to an attacking lane rather than oscillating left/right on
+          // a clock. A blocked lane invites a change of hand or a retreat.
+          target.set(dist > 4 ? p.driveSide * 1.9 : p.pos.x * 0.5, 0, -4.15);
+          if (gap < 1.3) target.x = p.pos.x + (p.pos.x - nearest.pos.x + p.driveSide * 0.6 > 0 ? 1.3 : -1.3);
           if (p.action !== 'shooting' && p.ownedFor > 1.4 && gap < 1.5 && !p.aiMove) { this.dribbleMove(p, this.rng() < 0.5 ? 'cross' : 'stepback'); p.aiMove = 2.1; }
           const teammate = this.players.find(t => t.team === p.team && t.id !== p.id);
           if (p.action !== 'shooting' && teammate && this.possessionPasses < 2 && p.ownedFor > 1.5 && !p.aiWait && (gap < 1.35 || teammate.id === 0 && !this.preview && p.ownedFor > 2.5)) {
             const laneOpen = defenders.every(d => segmentGap(d.pos, p.pos, teammate.pos) > 0.7);
             if (laneOpen && this.rng() < dt * 1.7) { this.pass(p, teammate); continue; }
           }
-          if (p.action !== 'shooting' && p.ownedFor > 1.25 && (dist < 3.2 || p.ownedFor > 4 || this.shotClock < 4 || gap > 2.2 && dist < 7.2)) {
+          if (p.action !== 'shooting' && p.ownedFor > 1.25 && (dist < 3.2 || p.ownedFor > 2.8 || this.shotClock < 4 || gap > 1.6 && dist < 7.2)) {
             if (this.rng() < dt * 2.2) { p.action = 'shooting'; p.actionTime = 1.4; p.charge = 0; }
           }
           if (p.action === 'shooting') {
             target.copy(p.pos); p.charge += dt;
+            if (p.charge > 0.43 && p.charge < 0.43 + dt * 1.5) this.jump(p);
             if (p.charge >= 0.72) {
               const timing = 0.72 + (this.rng() - 0.5) * (1 - diff.aiAccuracy) * 2.8;
               this.shoot(p, { aiCharge: timing });
@@ -398,28 +406,31 @@ export class GameEngine {
           }
         }
       } else if (!owner) {
-        target.copy(this.ball.pos); target.y = 0;
-        if (this.ball.pos.y > 2.7) { target.x = clamp(target.x, -5, 5); target.z = clamp(target.z, -5.9, 4); }
+        const b = this.ball, gravity = CONFIG.ball.gravity;
+        const fallTime = clamp((b.vel.y + Math.sqrt(Math.max(0, b.vel.y * b.vel.y + 2 * gravity * (b.pos.y - 1.4)))) / gravity, 0, 1.0);
+        target.copy(b.pos).addScaled(b.vel, fallTime); target.y = 0;
+        if (this.ball.pos.y > 2.7) { target.x = clamp(target.x, -5, 5) + (p.id % 2 ? 0.35 : -0.35); target.z = clamp(target.z, -5.9, 4); }
         if (this.shot && this.shot.team !== p.team && distance(p.pos, this.ball.pos) < 1.4 && this.ball.vel.y > 0 && this.rng() < dt * 5) this.jump(p);
         if (this.ballState === 'pass' && this.passInfo?.to === p.id) target.copy(p.pos); // Receive at the lead point, don't chase the passer.
       } else if (owner.team === p.team) {
         // The teammate alternates a cut with spacing on the opposite wing.
-        const cut = Math.sin(this.time * 0.5 + p.id) > 0.55;
-        target.set(owner.pos.x > 0 ? -4.6 : 4.6, 0, cut ? -4.6 : -0.4);
+        const giveAndGo = this.lastPass?.from === p.id && this.time - this.lastPass.time < 2.6;
+        target.set(giveAndGo ? -owner.pos.x * 0.35 : owner.pos.x > 0 ? -4.7 : 4.7, 0, giveAndGo ? -4.7 : -0.55);
         p.yaw = Math.atan2(owner.pos.x - p.pos.x, owner.pos.z - p.pos.z);
       } else {
         const mark = this.players.find(t => t.team !== p.team && (t.id % 2 === p.id % 2)) || owner;
         const victim = mark.id === owner.id ? owner : mark;
         const dir = new Vec3(hoop.x - victim.pos.x, 0, hoop.z - victim.pos.z).normalize();
-        target.copy(victim.pos).addScaled(dir, owner.id === victim.id ? 1.05 : 1.7);
-        target.x += Math.sin(this.time * 1.8 + p.id) * 0.16;
+        target.copy(victim.pos).addScaled(victim.vel, 0.14).addScaled(dir, owner.id === victim.id ? owner.action === 'shooting' ? 1.15 : 1.4 : 1.7);
+        if (owner.id !== victim.id && distance(owner.pos, hoop) < 2.7) target.set(owner.pos.x * 0.25, 0, -4.8);
         p.yaw = Math.atan2(victim.pos.x - p.pos.x, victim.pos.z - p.pos.z);
-        if (owner.id === victim.id && distance(p.pos, owner.pos) < 1.45 && this.rng() < dt * diff.stealRate) this.trySteal(p);
+        if (!this.needsClear && owner.ownedFor > 1.2 && owner.id === victim.id && distance(p.pos, owner.pos) < 1.45 && this.rng() < dt * diff.stealRate * 0.45) this.trySteal(p);
+        if (owner.action === 'shooting' && owner.charge > 0.46 && distance(p.pos, owner.pos) < 1.45 && this.rng() < dt * 2.8) this.jump(p);
       }
       const v = target.sub(p.pos); v.y = 0;
       const gap = v.length(); const speed = Math.min(gap * 3.2, diff.aiSpeed) * (p.stagger ? 0.18 : 1);
       if (gap > 0.03) v.scale(speed / gap); else v.set(0, 0, 0);
-      p.vel.lerp(v, Math.min(1, dt * 12)); p.pos.addScaled(p.vel, dt);
+      movePlayer(p, v, dt);
     }
   }
   separatePlayers() {

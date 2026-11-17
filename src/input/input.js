@@ -108,6 +108,7 @@ export class Input {
       cmd.aim.copy(forward); cmd.aim.y = Math.sin(this.pitch);
       cmd.defend = this.keys.has('ControlLeft') || this.keys.has('ControlRight');
       cmd.sprint = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
+      cmd.autoJump = true;
       // Holding through the check-ball cue gathers as soon as play is live.
       // The release remains a single event, so this cannot auto-fire shots.
       if ((this.mouseHeld || this.touchShoot) && engine.ownerId === 0 && engine.ballState === 'dribble') cmd.gather = true;

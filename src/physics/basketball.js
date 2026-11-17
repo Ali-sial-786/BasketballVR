@@ -25,7 +25,7 @@ export function releaseQuality(charge, difficulty = 'park', heat = false) {
 }
 
 export function makeShot({ from, feet, aim, charge = 0.72, physicalVelocity = null,
-  contest = 0, difficulty = 'park', heat = false, rng = Math.random, dunk = false }) {
+  contest = 0, difficulty = 'park', heat = false, rng = Math.random, dunk = false, layup = false, moving = 0 }) {
   const h = CONFIG.hoop, d = DIFFICULTIES[difficulty];
   const dist = Math.hypot(from.x - h.x, from.z - h.z);
   const to = new Vec3(h.x - from.x, 0, h.z - from.z).normalize();
@@ -41,7 +41,8 @@ export function makeShot({ from, feet, aim, charge = 0.72, physicalVelocity = nu
     q = { quality: form, green: form >= 0.92, timing: form >= 0.92 ? 'PERFECT' : form < 0.45 ? 'SOFT' : 'GOOD' };
   }
   const assisted = angle <= d.aimCone;
-  const quality = clamp(q.quality - contest * 0.36, 0, 1);
+  const movementPenalty = dunk || layup || physicalVelocity ? 0 : clamp((moving - 0.8) / 4, 0, 1) * 0.2;
+  const quality = clamp(q.quality - contest * 0.36 - movementPenalty, 0, 1);
   const error = Math.pow(1 - quality, 1.55) * (1.2 - d.assist * 0.45);
   const side = (rng() - 0.5) * 2 * error;
   const depth = (q.timing === 'EARLY' || q.timing === 'SOFT' ? 1 : -1) * error * 0.75;
@@ -51,9 +52,9 @@ export function makeShot({ from, feet, aim, charge = 0.72, physicalVelocity = nu
     target.x = from.x + facing.x * Math.max(2, dist);
     target.z = from.z + facing.z * Math.max(2, dist);
   }
-  const vel = arcVelocity(from, target, dunk ? Math.max(from.y + 0.35, 3.5) : 4.4 + dist * 0.075);
-  return { vel, quality, green: q.green && contest < 0.35 && assisted, timing: q.timing,
-    contest, value: dunk ? 2 : isThree(feet) ? 3 : 2, distance: dist, assisted, dunk };
+  const vel = arcVelocity(from, target, dunk ? Math.max(from.y + 0.35, 3.5) : layup ? 3.75 + dist * 0.075 : 4.4 + dist * 0.075);
+  return { vel, quality, green: q.green && contest < 0.35 && assisted && movementPenalty < 0.08, timing: q.timing,
+    contest, value: dunk || layup ? 2 : isThree(feet) ? 3 : 2, distance: dist, assisted, dunk, layup, moving };
 }
 
 export class Basketball {

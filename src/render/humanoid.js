@@ -216,18 +216,20 @@ function hullFor(geo) {
 }
 
 // Shared kit shader: the `kit` vertex attribute (slot, baked AO) picks a
-// per-figure uniform colour. Lighting stays Lambert (cheap on Quest) with:
+// per-figure uniform colour. Physically based skin, cloth and eyes retain:
 // baked ambient occlusion, a soft fresnel rim (cooler sheen on cloth, warm
 // scatter on skin), skin a touch warmer in shadow, and a back number whose
 // seven-segment digits are lit from a per-figure bit mask.
 // depth: the see-through body's depth pre-pass (setGhost), sharing `shared` (the figure's uniforms).
+const blankChestPrint = new THREE.DataTexture(new Uint8Array([0, 0, 0, 0]), 1, 1); blankChestPrint.needsUpdate = true;
 function kitMaterial(shared = null, depth = false) {
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  const mat = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.78, metalness: 0, clearcoat: 0.035, clearcoatRoughness: 0.48, envMapIntensity: 0.45 });
   if (depth) mat.defines = { GHOST_DEPTH: 1 };
   const uniforms = shared || {
     uKit1: { value: new THREE.Color(0x1f4fa8) }, uKit2: { value: new THREE.Color(0xf2c12e) }, uKit3: { value: new THREE.Color(0x14285a) },
     uKit4: { value: new THREE.Color(0x17336e) }, uSkin: { value: new THREE.Color(0xc68e62) }, uHair: { value: new THREE.Color(0x1d1510) },
     uPanel: { value: new THREE.Color(0x173f8c) },
+    uChestPrint: { value: blankChestPrint },
     uNumber: { value: 0 },         // lit back-number segments (bit i = segment i)
     uNoHead: { value: 0 },         // 1: the head and neck are not drawn (your own see-through body)
     uHeadBones: { value: new THREE.Vector2(RIG.index.neck, RIG.index.head) },
@@ -250,16 +252,17 @@ function kitMaterial(shared = null, depth = false) {
         uniform vec2 uHeadBones; uniform vec2 uLegBones; uniform vec2 uHandBones; uniform float uGloved; uniform int uNumber;
         uniform vec3 uKit1; uniform vec3 uKit2; uniform vec3 uKit3; uniform vec3 uKit4; uniform vec3 uSkin; uniform vec3 uHair; uniform vec3 uPanel;
         uniform vec3 uLegIdx; uniform vec3 uLegIdxR;
-        varying float vHeadW; varying float vLegW; varying vec3 vSeg; varying float vHandW; varying vec2 vKA;`)
+        varying float vHeadW; varying float vLegW; varying vec3 vSeg; varying float vHandW; varying vec2 vKA; varying vec3 vModelP;`)
       .replace('#include <color_vertex>', `#include <color_vertex>
         #ifdef USE_COLOR
           float k = kit.x;
           if (k > 9.5) { int seg = int(k - 10.0 + 0.5); vColor.rgb = ((uNumber >> seg) & 1) == 1 ? uKit2 : uKit1; }
-          else if (k > 7.5) vColor.rgb = uSkin * vec3(0.78, 0.6, 0.58);
+          else if (k > 8.5) { /* Preserve authored iris, pupil and sclera colors. */ }
+          else if (k > 7.5) vColor.rgb = uSkin * vec3(0.86, 0.72, 0.70);
           else if (k > 6.5) vColor.rgb = uPanel; else if (k > 5.5) vColor.rgb = uHair; else if (k > 4.5) vColor.rgb = uSkin; else if (k > 3.5) vColor.rgb = uKit4;
           else if (k > 2.5) vColor.rgb = uKit3; else if (k > 1.5) vColor.rgb = uKit2; else if (k > 0.5) vColor.rgb = uKit1;
         #endif
-        vKA = kit;
+        vKA = kit; vModelP = position;
         vHeadW = 0.0; vLegW = 0.0; vSeg = vec3(0.0); vHandW = 0.0;
         #ifdef USE_SKINNING
           for (int i = 0; i < 4; i++) {
@@ -274,8 +277,19 @@ function kitMaterial(shared = null, depth = false) {
           }
         #endif`);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform float uNoHead;\nuniform float uTrunkAlpha;\nuniform vec4 uGhost;\nuniform float uGhostEdge;\nvarying float vHeadW;\nvarying float vLegW;\nvarying vec3 vSeg;\nvarying float vHandW;\nuniform float uGhostHands;\nvarying vec2 vKA;')
+      .replace('#include <common>', '#include <common>\nuniform float uNoHead;\nuniform float uTrunkAlpha;\nuniform vec4 uGhost;\nuniform float uGhostEdge;\nvarying float vHeadW;\nvarying float vLegW;\nvarying vec3 vSeg;\nvarying float vHandW;\nuniform float uGhostHands;\nuniform sampler2D uChestPrint;\nvarying vec2 vKA; varying vec3 vModelP;')
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        float skinSurface = step(4.5, vKA.x) * step(vKA.x, 5.5) + step(7.5, vKA.x) * step(vKA.x, 8.5);
+        float pore = fract(sin(dot(floor(vModelP * 800.0), vec3(12.9898, 78.233, 43.21))) * 43758.5453);
+        roughnessFactor = mix(0.88, 0.48 + pore * 0.1, clamp(skinSurface, 0.0, 1.0));
+        float eyeSurface = step(8.5, vKA.x) * step(vKA.x, 9.5);
+        roughnessFactor = mix(roughnessFactor, 0.22, eyeSurface);`)
       .replace('#include <color_fragment>', `#include <color_fragment>
+  // Print onto the cloth so numbers follow its deformation without clipping.
+  vec2 chestUV = vec2(vModelP.x / 0.24 + 0.5, (vModelP.y - 1.12) / 0.26);
+  if (vKA.x > 0.5 && vKA.x < 1.5 && vModelP.z > 0.05 && chestUV.x >= 0.0 && chestUV.x <= 1.0 && chestUV.y >= 0.0 && chestUV.y <= 1.0) {
+    vec4 ink = texture2D(uChestPrint, chestUV); diffuseColor.rgb = mix(diffuseColor.rgb, ink.rgb, ink.a);
+  }
   diffuseColor.a *= mix(uTrunkAlpha, 1.0, clamp(vLegW, 0.0, 1.0));
   if (uGhost.w > 0.0) {
     vec3 sg = clamp(vSeg, 0.0, 1.0);
@@ -308,7 +322,7 @@ function kitMaterial(shared = null, depth = false) {
           }
         }`);
   };
-  mat.customProgramCacheKey = () => (depth ? 'rimrun-kit-v1-depth' : 'rimrun-kit-v1');
+  mat.customProgramCacheKey = () => (depth ? 'rimrun-kit-pbr-v3-depth' : 'rimrun-kit-pbr-v3');
   mat.userData.uniforms = uniforms;
   return mat;
 }
