@@ -37,10 +37,11 @@ export class PlayerView {
     this.marker.rotation.x = -Math.PI / 2; scene.add(this.marker);
     this.previous = this.h.snapshot();
   }
-  update(dt, time, p, engine, visible = true, firstPerson = false) {
-    const h = this.h;
+  update(dt, time, p, engine, visible = true, viewPitch = null) {
+    const h = this.h, firstPerson = viewPitch !== null;
     this.root.visible = this.shadow.visible = this.marker.visible = visible; if (!visible) return;
     h.setArmsOnly(firstPerson);
+    h.mesh.castShadow = !firstPerson;
     this.marker.visible = !firstPerson;
     this.previous = h.snapshot(this.previous); h.reset();
     this.root.position.set(p.pos.x, p.jump, p.pos.z);
@@ -70,6 +71,15 @@ export class PlayerView {
     this.landTime = Math.max(0, (this.landTime || 0) - dt);
     h.bones.hips.position.y -= Math.sin(Math.PI * this.landTime / 0.18) * 0.075;
     h.update();
+    if (firstPerson && viewPitch < -0.14) {
+      // Keep the base of the neck behind the eyes even when the source clip
+      // leans far forward. Ball targets stay in world space for the arm IK.
+      const neck = h.worldPos('neck', new THREE.Vector3());
+      const weight = THREE.MathUtils.smoothstep(-viewPitch, 0.14, 0.62);
+      this.root.position.x += (p.pos.x - 0.22 * Math.sin(p.yaw) - neck.x) * weight;
+      this.root.position.z += (p.pos.z - 0.22 * Math.cos(p.yaw) - neck.z) * weight;
+      h.update();
+    }
     const localToWorld = point => this.root.localToWorld(point);
     const ball = new THREE.Vector3().copy(engine.ball.pos);
     const receiving = engine.passInfo?.to === p.id && ball.distanceTo(localToWorld(V(0, 1.35, 0.2))) < 2.1;

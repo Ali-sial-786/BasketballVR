@@ -243,7 +243,7 @@ async function init() {
       for (const [i, view] of players.entries()) {
         const p = engine.players[i];
         const local = p.id === 0 && !menu && !demo;
-        view.update(dt, engine.time, p, engine, !local || !input.xr, local && !input.xr);
+        view.update(dt, engine.time, p, engine, !local || !input.xr, local && !input.xr ? input.pitch : null);
         if (!local) view.h.updateLod(viewer);
       }
       hands.update(input, engine, !menu && !demo && engine.phase === 'playing'); effects.update(dt, engine); court.update(dt, engine);

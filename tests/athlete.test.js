@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import * as THREE from 'three';
 // The rig is real three.js skinning and IK; only its canvas shadow is stubbed.
-globalThis.document = { createElement: () => ({ getContext: () => ({ createRadialGradient: () => ({ addColorStop() {} }), fillRect() {} }) }) };
+globalThis.document = { createElement: () => ({ getContext: () => ({ createRadialGradient: () => ({ addColorStop() {} }), fillRect() {}, fillText() {} }) }) };
 globalThis.fetch = async url => {
   try { const buffer = await fs.readFile(fileURLToPath(new URL(`../public/${url}`, import.meta.url))); return { ok: true, json: async () => JSON.parse(buffer), arrayBuffer: async () => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) }; }
   catch { return { ok: false, status: 404 }; }
@@ -83,4 +83,24 @@ test('first-person arms keep their skinning and restore the complete model when 
   });
   assert(boneNames.includes('handL') && boneNames.includes('handR')); assert(!boneNames.includes('head'));
   h.setArmsOnly(false); assert.equal(h.mesh.geometry, full); assert.equal(h.mesh.skeleton, skeleton);
+});
+
+
+test('looking down at a crossover keeps the cut shoulders behind the first-person camera', async () => {
+  const { PlayerView } = await import('../src/render/athletes.js');
+  const { GameEngine } = await import('../src/game/engine.js');
+  const g = new GameEngine(); g.start('practice'); g.checkTimer = 0;
+  const scene = new THREE.Scene(), view = new PlayerView(scene, g.human);
+  const forward = new THREE.Vector3(Math.sin(g.human.yaw), 0, Math.cos(g.human.yaw));
+  g.dribbleMove(g.human, 'cross');
+  for (let i = 0; i < 40; i++) {
+    g.step(1 / 60); view.update(1 / 60, g.time, g.human, g, true, -1.1);
+    for (const side of ['L', 'R']) {
+      const shoulder = view.h.worldPos('shoulder' + side, new THREE.Vector3());
+      assert(shoulder.sub(g.human.pos).dot(forward) < -0.06);
+    }
+  }
+  view.update(1 / 60, g.time, g.human, g);
+  assert.equal(view.h.armsOnly, false); assert.equal(view.h.mesh.castShadow, true);
+  view.dispose(scene);
 });
