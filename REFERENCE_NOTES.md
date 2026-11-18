@@ -16,3 +16,17 @@ The outdoor demo is captured from commit `fef750d` before the improvement pass. 
 The pickup chapters use reproducible AI random seeds. The opening screen is held for two seconds; every gameplay frame is rendered from the simulation for the 24 fps recording, without motion interpolation. Recording speed on the software renderer is not a measurement of headset performance.
 
 Implemented in this pass: adult anatomical head/jaw proportions and athletic limb shapes, 56k-triangle close models with distinct skin/fabric shading, acceleration and braking, timed move travel and low transfer paths, world-planted foot IK, asymmetric defensive hands, automatic desktop/touch shot lift, contextual layups, a movement accuracy penalty, committed AI drives and passing lanes, predictive rebounding, and The Fieldhouse indoor arena. The Watch Gameplay view uses normal AI matches, offers 1v1/2v2/3PT switching, and can hand control to the player.
+
+## Mechanics pass: physical references
+
+This pass was built from published dimensions and standard sports-physics figures rather than new footage, and tuned in simulation.
+
+| Area | Reference figure | Used as |
+| --- | --- | --- |
+| Ring | 457 mm inside diameter, 16–20 mm steel bar, 3.05 m high | `CONFIG.hoop` radius 0.238 m to the bar centre, tube 9.5 mm |
+| Ball | Size 7: about 0.24 m diameter, 0.62 kg; drag coefficient near 0.47 | Radius 0.12 m; drag 0.0206 per metre; thin-shell inertia 2/3 m r² for spin and friction |
+| Rebound | A legal ball dropped from 1.8 m returns to roughly 1.2–1.4 m | Floor restitution 0.76 |
+| Jump shot | Release angles commonly coached around 45–55°, higher close in; two to three revolutions of backspin per second | `shotElevation`, backspin 1.7–2.9 rev/s by distance |
+| Passing | Chest passes travel on the order of 10–15 m/s | Chest 12.5 m/s, bounce 10.5 m/s into a spot about two thirds of the way |
+
+Tuning method: (1) a Monte Carlo of the shot model across distance, timing error, contest and difficulty; (2) seeded AI-versus-AI games at each level, watching shot mix, percentages, blocks, steals and game length; (3) a scripted player driven through the same command interface as the keyboard, with a human-like spread in release timing and a quarter-second reaction lag on defense. Typical results at Park: AI mid-range about 45–65%, threes about 25%, layups about 70–80%, blocks on a small share of shots; the scripted player beats Rookie comfortably, wins most games at Park by a few points, and splits All-star. None of this replaces playing it; the numbers are a starting point.

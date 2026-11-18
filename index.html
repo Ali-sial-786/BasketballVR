@@ -50,15 +50,16 @@
   <section id="hud" class="hud" aria-label="Game status" hidden>
     <div class="hud-top"><button id="pause" class="hud-menu" aria-label="Pause game"><svg viewBox="0 0 18 18" width="15" height="15" aria-hidden="true"><path d="M5 3v12M13 3v12" stroke="currentColor" stroke-width="2"/></svg><span>MENU</span></button><div class="scoreboard"><div class="score-side home"><span id="home-label">YOU</span><strong id="score-home">00</strong></div><div class="score-middle"><span id="mode-label">1V1 · FIRST TO 11</span><strong id="clock">18</strong><small id="clock-label">SHOT CLOCK</small></div><div class="score-side away"><span id="away-label">THEM</span><strong id="score-away">00</strong></div></div><div class="court-mini">THE FIELDHOUSE <span>● LIVE</span></div></div>
     <div id="toast" class="toast" role="status"><strong></strong><span></span></div>
-    <div id="shot-feedback" class="shot-feedback"><span class="feedback-label">LAST SHOT</span><strong id="release-text">PERFECT</strong><div><span id="shot-quality">100%</span><span id="shot-contest">OPEN</span><span id="shot-distance">6.8 M</span></div></div>
+    <div id="shot-feedback" class="shot-feedback"><span class="feedback-label" id="shot-kind">LAST SHOT</span><strong id="release-text">PERFECT</strong><em id="shot-result"></em><div><span id="shot-quality">100%</span><span id="shot-contest">OPEN</span><span id="shot-distance">6.8 M</span><span id="shot-arc">ARC 50°</span></div></div>
     <div class="reticle"><i></i></div>
-    <div class="shot-meter" id="shot-meter"><div class="meter-caption"><span>GATHER → RELEASE</span><strong id="meter-word">FIND THE GREEN</strong></div><div class="meter-track"><div class="green-zone"></div><div class="meter-fill" id="meter-fill"></div><div class="meter-needle" id="meter-needle"></div></div></div>
+    <div class="shot-meter" id="shot-meter" aria-hidden="true"><div class="meter-track"><div class="green-zone"></div><div class="meter-fill" id="meter-fill"></div><div class="meter-needle" id="meter-needle"></div></div><div class="meter-caption"><strong id="meter-word">RISE</strong><span id="meter-note">RELEASE AT THE TOP</span></div></div>
     <div id="rack-progress" class="rack-progress" hidden></div>
-    <div class="bottom-hud"><div class="energy"><div class="possession" id="possession">YOUR BALL <span>↗</span></div><div class="energy-label"><span>STAMINA</span><span id="heat-label">HEAT <i>○ ○ ○ ○ ○</i></span></div><div class="energy-track"><div id="stamina-fill"></div></div><div id="combo" class="combo"></div></div><div class="context-help" id="context-help"><span><kbd>HOLD LMB</kbd> gather & shoot</span><span><kbd>Q E R C</kbd> handles</span><span><kbd>SPACE</kbd> jump / block</span></div><canvas id="minimap" width="180" height="180" aria-label="Court map"></canvas></div>
+    <div class="bottom-hud"><div class="energy"><div class="possession" id="possession">YOUR BALL <span>↗</span></div><div class="energy-label"><span>STAMINA</span><span id="heat-label">HEAT <i>○ ○ ○ ○ ○</i></span></div><div class="energy-track"><div id="stamina-fill"></div></div><div id="combo" class="combo"></div></div><div class="context-help" id="context-help"></div><canvas id="minimap" width="180" height="180" aria-label="Court map"></canvas></div>
     <div id="touch-controls"><div id="touch-stick" aria-label="Move"><span></span></div>
       <div class="touch-actions">
-        <button data-action="cross">CROSS</button><button data-action="behind">WRAP</button><button data-action="spin">SPIN</button>
-        <button data-action="stepback">BACK</button><button data-action="pass">PASS</button><button data-action="jump">JUMP</button>
+        <button data-action="cross">CROSS</button><button data-action="legs">LEGS</button><button data-action="behind">WRAP</button>
+        <button data-action="hesi">HESI</button><button data-action="spin">SPIN</button><button data-action="stepback">BACK</button>
+        <button data-action="pass">PASS</button><button data-action="jump">JUMP</button><button data-action="camera" class="touch-camera" aria-label="Switch camera">VIEW</button>
         <button data-action="steal" hidden>STEAL</button><button data-action="defend" aria-label="Hold defensive stance" hidden>GUARD</button>
         <button data-action="shoot" class="touch-shoot">HOLD TO SHOOT</button>
       </div>

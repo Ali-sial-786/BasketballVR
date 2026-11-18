@@ -11,7 +11,8 @@
     "preview": "vite preview --host 0.0.0.0",
     "test": "node --test tests/*.test.js",
     "test:smoke": "node tools/smoke.mjs",
-    "record:demo": "node tools/capture_demo.mjs"
+    "record:demo": "node tools/capture_demo.mjs",
+    "review:motion": "node tools/review_motion.mjs"
   },
   "dependencies": {
     "three": "0.180.0"

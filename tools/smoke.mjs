@@ -51,10 +51,26 @@ try {
   await until(page, () => window.__rimrun.engine.charge >= 0.68); await page.mouse.up();
   await until(page, () => window.__rimrun.engine.stats.made === 1);
   assert.equal(await page.evaluate(() => window.__rimrun.engine.stats.attempts), 1);
+  // The shot card reports the release, the arc and what the ball actually did.
+  assert.match(await page.locator('#shot-arc').textContent(), /ARC \d+°/); assert.match(await page.locator('#shot-result').textContent(), /SWISH|RIM AND IN|ROLL|GLASS/);
   await until(page, () => window.__rimrun.engine.ownerId === 0);
+  // A quick tap shows the ball without spending the attempt.
+  await page.mouse.down(); await frames(page, 2); await page.mouse.up();
+  await until(page, () => window.__rimrun.engine.human.pump > 0);
+  assert.equal(await page.evaluate(() => window.__rimrun.engine.stats.attempts), 1);
+  await until(page, () => window.__rimrun.engine.human.pump === 0);
   await page.keyboard.press('KeyQ'); await until(page, () => window.__rimrun.engine.stats.moves === 1);
   await until(page, () => window.__rimrun.engine.human.moveCooldown === 0);
   await page.keyboard.press('KeyE'); await until(page, () => window.__rimrun.engine.stats.moves === 2);
+  await until(page, () => window.__rimrun.engine.human.moveCooldown === 0);
+  await page.keyboard.press('KeyZ'); await until(page, () => window.__rimrun.engine.human.moveState?.kind === 'legs');
+  await until(page, () => window.__rimrun.engine.human.moveCooldown === 0);
+  await page.keyboard.press('KeyT'); await until(page, () => window.__rimrun.engine.stats.moves === 4);
+  // V switches to the broadcast camera and back; the choice is remembered.
+  await page.keyboard.press('KeyV'); assert.equal(await page.evaluate(() => window.__rimrun.settings.camera), 'third');
+  await frames(page, 20); await until(page, () => getComputedStyle(document.getElementById('blink')).opacity === '0');
+  await screenshot(page, `${output}/desktop-broadcast.png`);
+  await page.keyboard.press('KeyV'); assert.equal(await page.evaluate(() => window.__rimrun.settings.camera), 'first'); await frames(page, 4);
   await until(page, () => getComputedStyle(document.getElementById('blink')).opacity === '0');
   await screenshot(page, `${output}/desktop-game.png`);
   await page.keyboard.press('KeyM'); await page.locator('#resume-game').waitFor();
@@ -73,7 +89,7 @@ try {
   await until(page, () => window.__rimrun.engine.contestShots === 1);
   assert.equal(await page.evaluate(() => window.__rimrun.engine.score[0]), 1); assert(await page.locator('#rack-progress').isVisible());
   await screenshot(page, `${output}/three-point-contest.png`);
-  console.log('Desktop: menu, movement, green release, bucket, dribble chain, pause/resume, 2v2 pass and contest shot passed.');
+  console.log('Desktop: menu, movement, timed release, shot report, pump fake, six handles, camera switch, pause/resume, 2v2 pass and contest shot passed.');
   await page.keyboard.press('KeyM'); await page.locator('#leave-game').click();
   await page.locator('[data-mode="2v2"]').click(); await page.locator('#watch-demo').click();
   await until(page, () => window.__rimrun.engine.checkTimer === 0); await frames(page, 180);
@@ -95,6 +111,7 @@ try {
   await mobile.locator('[data-mode="practice"]').tap(); await mobile.locator('#play').tap();
   await until(mobile, () => window.__rimrun.engine.checkTimer === 0);
   assert(await mobile.locator('#touch-stick').isVisible()); assert(await mobile.locator('[data-action="shoot"]').isVisible());
+  for (const action of ['legs', 'hesi', 'behind', 'stepback']) assert(await mobile.locator(`[data-action="${action}"]`).isVisible(), `touch handle: ${action}`);
   await mobile.locator('[data-action="cross"]').tap(); await until(mobile, () => window.__rimrun.engine.stats.moves === 1);
   await screenshot(mobile, `${output}/mobile-game.png`);
   await until(mobile, () => window.__rimrun.engine.human.moveCooldown === 0);

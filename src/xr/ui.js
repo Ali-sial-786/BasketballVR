@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { greenWindow } from '../physics/basketball.js';
 import { CONFIG, MODES } from '../config.js';
 
 export class XRUI {
@@ -40,7 +39,7 @@ export class XRUI {
     this.button(60, 710, 425, 68, `MOVE: ${this.settings.locomotion.toUpperCase()}`, () => { this.settings.locomotion = this.settings.locomotion === 'smooth' ? 'blink' : 'smooth'; this.hooks.settings(); this.drawMenu(); });
     this.button(515, 710, 425, 68, `TURN: ${this.settings.turn.toUpperCase()}`, () => { const turns = ['snap', 'smooth', 'off']; this.settings.turn = turns[(turns.indexOf(this.settings.turn) + 1) % 3]; this.hooks.settings(); this.drawMenu(); });
     c.fillStyle = '#d2d9c2'; c.font = '23px Arial';
-    ['Grip, lift & release to shoot. Or hold trigger → green → release.', 'Ball hand lower / upper button: cross / wrap. Stick up / down: spin / back.', 'Off-hand trigger: pass. Lower face button: jump / block.', 'Left stick: move. Off-hand upper button / right stick click: pause.', 'Use straps. Clear your play space. Let the stick do the running.'].forEach((s, i) => c.fillText(s, 65, 829 + i * 39, 865));
+    ['Grip, lift & flick to shoot: the ball follows your hand. Or hold trigger, release in the green.', 'Ball hand A / B: cross / wrap. With left stick click: legs / hesitation. Right stick up / down: spin / back.', 'Off-hand trigger: pass. Throw flat for a chest pass, down and out for a bounce pass.', 'Off-hand grip: stance. Ball-hand trigger: steal. Off-hand A: jump. Get a real hand on a shot to block it.', 'Use straps. Clear your play space. Let the stick do the running.'].forEach((s, i) => c.fillText(s, 65, 829 + i * 39, 865));
     this.button(60, 1030, 880, 55, 'LEAVE VR', () => this.hooks.exit());
     this.buttons.forEach((b, i) => {
       c.fillStyle = b.selected ? '#f1c292' : i === this.hover ? '#4b7561' : '#2c5148'; c.beginPath(); c.roundRect(b.x, b.y, b.w, b.h, 10); c.fill();
@@ -48,7 +47,11 @@ export class XRUI {
     });
     c.textBaseline = 'alphabetic'; this.menuTexture.needsUpdate = true;
   }
-  event(event, now) { if (event.type === 'toast') { this.message = `${event.title} ${event.detail}`; this.messageUntil = now + 2.2; } }
+  event(event, now) {
+    if (event.type === 'toast') { this.message = `${event.title} ${event.detail}`; this.messageUntil = now + 2.2; }
+    // What the ball actually did, readable without looking away from the rim.
+    if (event.type === 'shotResult' && event.player === 0 && now > this.messageUntil) { this.message = `${event.made ? 'GOOD' : 'NO GOOD'} · ${event.label}`; this.messageUntil = now + 2; }
+  }
   update(dt, now) {
     const input = this.input, e = this.engine;
     if (!input.xr) { this.panel.visible = false; this.hud.visible = false; this.rays.forEach(l => l.visible = false); return; }
@@ -85,10 +88,10 @@ export class XRUI {
     c.fillStyle = '#f8e8c7'; c.textAlign = 'center'; c.font = 'bold 48px Arial';
     c.fillText(e.mode === 'contest' ? `${e.score[0]} PTS    /    ${Math.ceil(e.contestTime)} SEC    /    ${25 - e.contestShots} LEFT` : `${e.score[0]}    HOME     /     AWAY    ${e.score[1]}     ·     ${e.mode === 'practice' ? 'FREE' : Math.ceil(e.shotClock)}`, 512, 68);
     c.font = '24px Arial'; c.fillStyle = '#e4c494';
-    c.fillText(now < this.messageUntil ? this.message : e.needsClear && e.possession === 0 ? 'CLEAR IT BEYOND THE ARC' : e.ownerId === 0 ? 'YOUR BALL · GRIP TO GATHER · LIFT & RELEASE' : 'GET OPEN · HANDS UP · STAY IN FRONT', 512, 120, 950);
+    c.fillText(now < this.messageUntil ? this.message : e.needsClear && e.possession === 0 ? 'CLEAR IT BEYOND THE ARC' : e.ownerId === 0 ? 'YOUR BALL · GRIP TO GATHER · LIFT & RELEASE' : e.isMatch && e.possession === 1 ? 'STAY IN FRONT · HAND UP · TIME YOUR JUMP' : 'GET OPEN · CALL FOR IT', 512, 120, 950);
     if (e.ownerId === 0 && e.ballState === 'held') {
       c.fillStyle = '#547364'; c.fillRect(195, 156, 634, 26);
-      const window = greenWindow(e.difficulty, e.heatTime > 0);
+      const window = e.releaseWindow();
       c.fillStyle = '#addc9d'; c.fillRect(195 + 634 * (CONFIG.shot.idealTime - window) / CONFIG.shot.maxCharge, 156, 634 * 2 * window / CONFIG.shot.maxCharge, 26);
       c.fillStyle = '#fff3da'; c.fillRect(195 + 634 * e.charge / CONFIG.shot.maxCharge, 153, 6, 32);
     }

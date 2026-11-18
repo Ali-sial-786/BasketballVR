@@ -39,7 +39,9 @@ async function init() {
   const input = new Input(renderer, rig, camera, renderer.domElement), hands = new HandsView(scene, court.environment);
   let players = [], menu = true, demo = false, demoRestart = 0, accumulator = 0, lastTime = null, uiTick = 0, pending = {}, blink = 0, xrBlink = 0, nextFrame = false;
   const demoFocus = new THREE.Vector3(0, 1.2, -2.2), demoPosition = new THREE.Vector3();
-  const viewerPosition = new THREE.Vector3();
+  const viewerPosition = new THREE.Vector3(), chase = new THREE.Vector3(), chaseLook = new THREE.Vector3();
+  let chaseReady = false; const squeaks = new Map();
+  const thirdPerson = () => settings.camera === 'third' && !input.xr;
   let lastHeadRef = null;
   const blinkElement = document.getElementById('blink');
   // An eye-centred black sphere fades short relocations inside the headset too.
@@ -63,14 +65,13 @@ async function init() {
       rig.rotation.y = input.yaw - Math.atan2(f.x, f.z);
       input.left.resetMotion(); input.right.resetMotion();
     }
-    blink = 0.18; xrBlink = 0.16;
+    blink = 0.18; xrBlink = 0.16; chaseReady = false;
   }
   function start(mode) {
     demo = false; ui.setDemo(false);
     audio.init(); ui.closeForAction(); menu = false; engine.start(mode, settings.difficulty); setupPlayers();
     input.clear(); input.enabled = true; pending = {}; accumulator = 0; nextFrame = true; engine.human.side = settings.dominant === 'left' ? -1 : 1;
     ui.setPlaying(true); xrUI.close(); faceBasket(); input.lock();
-    document.getElementById('context-help').innerHTML = `<span><kbd>HOLD LMB</kbd> gather & shoot</span><span><kbd>Q E R C</kbd> handles</span><span><kbd>${mode === '2v2' ? 'X' : 'SPACE'}</kbd> ${mode === '2v2' ? 'pass / call' : 'jump / block'}</span>`;
   }
   function startDemo(mode = '2v2') {
     if (input.xr) { start(mode); return; }
@@ -80,7 +81,7 @@ async function init() {
     engine.start(mode, settings.difficulty); engine.preview = engine.isMatch; setupPlayers();
     ui.setPlaying(true); ui.setDemo(true, mode); pending = {}; accumulator = 0; nextFrame = true;
     demoFocus.set(0, 1.2, -2.2); rig.position.set(0, 0, 0); rig.rotation.set(0, 0, 0);
-    camera.position.set(8.8, 4.6, 5.5); blink = 0.13;
+    camera.position.set(7.6, 2.7, 0.4); blink = 0.13;
   }
   function takeControl() {
     if (!demo) return;
@@ -108,6 +109,11 @@ async function init() {
     if (engine.preview) { start(ui.mode); return; }
     ui.closeForAction(); xrUI.close(); engine.resume(); input.clear(); input.enabled = true; accumulator = 0; pending = {}; nextFrame = true; input.lock();
   }
+  input.onCamera = () => {
+    if (menu || demo || input.xr) return;
+    settings.camera = settings.camera === 'third' ? 'first' : 'third'; ui.syncSettings(); chaseReady = false;
+    engine.toast(settings.camera === 'third' ? 'BROADCAST VIEW.' : 'FIRST PERSON.', 'Press V to switch.');
+  };
   input.onPause = () => { if (engine.phase === 'playing') pause(); else if (engine.phase === 'paused' && !menu) { ui.closeForAction(); resume(); } };
 
   const ui = new UI(engine, settings, {
@@ -165,23 +171,38 @@ async function init() {
       rig.position.set(0, 0, 0); rig.rotation.set(0, 0, 0);
       const target = new THREE.Vector3();
       for (const p of engine.players) target.add(new THREE.Vector3(p.pos.x, 0, p.pos.z));
-      target.multiplyScalar(0.65 / engine.players.length).addScaledVector(engine.ball.pos, 0.35);
-      target.y = 1.3 + Math.min(1.2, Math.max(0, engine.ball.pos.y - 2) * 0.2);
-      target.x = THREE.MathUtils.clamp(target.x, -3.2, 3.2); target.z = THREE.MathUtils.clamp(target.z, -4.4, 1.8);
-      demoFocus.lerp(target, 1 - Math.exp(-dt * 2.2));
-      demoPosition.set(8.8 + demoFocus.x * 0.18, 4.6, 5.5 + demoFocus.z * 0.15);
-      camera.position.lerp(demoPosition, 1 - Math.exp(-dt * 1.7)); camera.lookAt(demoFocus);
+      target.multiplyScalar(0.5 / engine.players.length).addScaledVector(engine.ball.pos, 0.5);
+      target.y = 1.25 + Math.min(1.3, Math.max(0, engine.ball.pos.y - 2) * 0.3);
+      target.x = THREE.MathUtils.clamp(target.x, -4.6, 4.6); target.z = THREE.MathUtils.clamp(target.z, -5.6, 2.6);
+      demoFocus.lerp(target, 1 - Math.exp(-dt * 2.6));
+      // A low sideline camera that travels with the play, close enough to
+      // read footwork, hands and the ball.
+      demoPosition.set(7.6 + demoFocus.x * 0.22, 2.7, 1.4 + demoFocus.z * 0.62);
+      camera.position.lerp(demoPosition, 1 - Math.exp(-dt * 1.9)); camera.lookAt(demoFocus);
+    } else if (thirdPerson()) {
+      // Over the shoulder: behind the athlete along the aim line, high enough
+      // to see the handle, the defender and the rim together.
+      const p = engine.human, sin = Math.sin(input.yaw), cos = Math.cos(input.yaw), back = 2.75 - input.pitch * 0.6;
+      rig.position.set(0, 0, 0); rig.rotation.set(0, 0, 0);
+      chaseLook.set(p.pos.x + sin * 3.4, 1.72 + p.jump * 0.5 + input.pitch * 3, p.pos.z + cos * 3.4);
+      // Sit just off the ball-hand shoulder so the lane ahead stays open.
+      const shoulder = 0.42 * p.side;
+      viewerPosition.set(THREE.MathUtils.clamp(p.pos.x - sin * back - cos * shoulder, -9.3, 9.3), 2.02 + p.jump * 0.4 - input.pitch * 1.1, THREE.MathUtils.clamp(p.pos.z - cos * back + sin * shoulder, -9.2, 21));
+      if (!chaseReady) { chase.copy(viewerPosition); chaseReady = true; } else chase.lerp(viewerPosition, 1 - Math.exp(-dt * 14));
+      camera.position.copy(chase); camera.lookAt(chaseLook);
     } else {
       rig.position.set(engine.human.pos.x, engine.human.jump, engine.human.pos.z); rig.rotation.set(0, 0, 0);
       camera.position.set(0, 1.72, 0); camera.rotation.set(input.pitch, input.yaw - Math.PI, 0, 'YXZ');
     }
+    const fov = input.xr ? camera.fov : demo && !menu ? 46 : thirdPerson() && !menu ? 60 : 68;
+    if (camera.fov !== fov) { camera.fov = fov; camera.updateProjectionMatrix(); }
     rig.updateMatrixWorld(true); camera.updateMatrixWorld(true);
   }
 
   // Integration harness exposed only with an explicit test query parameter.
   // Smoke tests drive normal input and use this snapshot to assert outcomes.
   if (new URLSearchParams(location.search).has('test')) {
-    window.__rimrun = { engine, input, start, startDemo, takeControl, pause, resume, home, scene, renderer,
+    window.__rimrun = { engine, input, settings, start, startDemo, takeControl, pause, resume, home, scene, renderer, views: () => players,
       snapshot: () => ({ phase: engine.phase, mode: engine.mode, score: [...engine.score], owner: engine.ownerId, ball: engine.ball.pos.toArray(), stats: { ...engine.stats }, rack: engine.rack, shots: engine.contestShots }) };
   }
   home(); document.body.classList.add('ready');
@@ -199,6 +220,7 @@ async function init() {
       }
       lastHeadRef = input.xr && input.viewerTracked ? { x: input.headRef.p.x, z: input.headRef.p.z } : null;
       const cmd = demo ? demoCommand(engine) : input.command(dt, settings, engine);
+      if (!demo && !input.xr && !thirdPerson()) cmd.eyeView = true;
       const discrete = ['gather', 'cancelGather', 'release', 'jump', 'moveAction', 'steal', 'pass', 'blink', 'blinkStep'];
       for (const key of discrete) if (cmd[key] != null) pending[key] = cmd[key];
       if (cmd.blink) { blink = 0.13; xrBlink = 0.13; }
@@ -216,12 +238,12 @@ async function init() {
       }
       for (const event of engine.drainEvents()) {
         if (!menu && (!engine.preview || demo)) {
-          ui.event(event, now); xrUI.event(event, now); audio.play(event);
-          if (event.type === 'score') { court.score(); effects.burst(new THREE.Vector3(CONFIG.hoop.x, CONFIG.hoop.y, CONFIG.hoop.z), event.green); }
+          ui.event(event, now, demo); xrUI.event(event, now); audio.play(event);
+          court.event(event); effects.event(event);
           if (event.type === 'recenter' && !demo) faceBasket();
-          if (['shot', 'bounce', 'steal', 'block', 'catch', 'move', 'score'].includes(event.type)) {
-            const strength = { shot: 0.2, bounce: 0.1, steal: 0.5, block: 0.7, catch: 0.3, move: 0.18, score: 0.6 }[event.type];
-            const personal = (event.player ?? event.owner) === 0 || event.type === 'shot' || event.type === 'score' && event.team === 0;
+          const strength = { shot: 0.25, bounce: 0.1, steal: 0.5, poke: 0.4, block: 0.7, catch: 0.3, move: 0.18, score: 0.6, bump: 0.35, land: 0.12, pump: 0.15 }[event.type];
+          if (strength) {
+            const personal = (event.player ?? event.owner) === 0 || event.type === 'score' && event.team === 0;
             if (input.xr && personal) input[input.physicalGather || settings.dominant].pulse(strength, event.type === 'score' ? 90 : 25);
           }
           if (event.type === 'finish') {
@@ -242,11 +264,17 @@ async function init() {
       const viewer = input.xr ? input.head.p : camera.getWorldPosition(viewerPosition);
       for (const [i, view] of players.entries()) {
         const p = engine.players[i];
-        const local = p.id === 0 && !menu && !demo;
-        view.update(dt, engine.time, p, engine, !local || !input.xr, local && !input.xr ? input.pitch : null);
-        if (!local) view.h.updateLod(viewer);
+        const local = p.id === 0 && !menu && !demo, own = local && !thirdPerson();
+        view.update(dt, engine.time, p, engine, !local || !input.xr, own && !input.xr ? input.pitch : null);
+        if (!own) view.h.updateLod(viewer);
+        // Hard plants and cuts chirp on the hardwood.
+        const force = p.acceleration.length(), last = squeaks.get(p.id) || 0;
+        if (dt && engine.phase === 'playing' && !menu && p.jump < 0.02 && force > 16 && p.vel.length() > 1.4 && now - last > 0.32 && p.acceleration.dot(p.vel) < 0) {
+          squeaks.set(p.id, now); audio.play({ type: 'squeak', strength: Math.min(1, force / 22) });
+        }
       }
-      hands.update(input, engine, !menu && !demo && engine.phase === 'playing'); effects.update(dt, engine); court.update(dt, engine);
+      hands.update(input, engine, !menu && !demo && engine.phase === 'playing'); effects.update(dt, engine); court.update(dt, engine, now);
+      audio.update(engine, !menu || demo);
       xrUI.update(dt, now);
       uiTick += dt; if (uiTick > 0.05) { uiTick = 0; if (!menu) ui.update(now); }
       blink = Math.max(0, blink - wallDt); blinkElement.style.opacity = String(Math.min(0.85, blink * 6));

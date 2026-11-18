@@ -47,13 +47,16 @@ try {
       const seedMatch = value => { let seed = value; e.rng = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }; };
       const aim = () => { i.yaw = Math.atan2(-e.human.pos.x, -6.1 - e.human.pos.z); i.pitch = 0.16; };
       if (is(0)) note.textContent = `RIMRUN / ${name === 'baseline' ? 'CURRENT BUILD — BEFORE IMPROVEMENTS' : 'IMPROVED BUILD — ACTUAL GAMEPLAY'}`;
-      if (is(2)) { g.start('practice'); note.textContent = 'SHOOTAROUND / CROSS → WRAP → SPIN → STEPBACK'; }
+      if (is(2)) { if (g.settings) g.settings.camera = name === 'baseline' ? 'first' : 'third'; g.start('practice'); note.textContent = name === 'baseline' ? 'SHOOTAROUND / CROSS → WRAP → SPIN → STEPBACK' : 'HANDLES / CROSS → LEGS → WRAP → SPIN → HESI → STEPBACK'; }
       if (is(3.3)) { i.keys.add('KeyW'); i.keys.add('ShiftLeft'); }
       if (is(4)) { i.keys.delete('KeyW'); i.keys.delete('ShiftLeft'); }
-      if (is(4.2)) i.push('moveAction', 'cross'); if (is(4.9)) i.push('moveAction', 'behind');
-      if (is(5.6)) i.push('moveAction', 'spin'); if (is(6.4)) i.push('moveAction', 'stepback');
-      if (is(7.3)) { aim(); i.push('gather', true); note.textContent = 'SHOOTING / GATHER, SET, RELEASE ON GREEN'; }
-      if (is(8.02)) i.push('release', {});
+      if (name === 'baseline') {
+        if (is(4.2)) i.push('moveAction', 'cross'); if (is(4.9)) i.push('moveAction', 'behind');
+        if (is(5.6)) i.push('moveAction', 'spin'); if (is(6.4)) i.push('moveAction', 'stepback');
+      } else ['cross', 'legs', 'behind', 'spin', 'hesi', 'stepback'].forEach((move, n) => { if (is(4.1 + n * 0.72)) i.push('moveAction', move); });
+      const shotAt = name === 'baseline' ? 7.3 : 8.9;
+      if (is(shotAt)) { aim(); i.push('gather', true); note.textContent = 'SHOOTING / DIP, RISE, RELEASE AT THE TOP'; }
+      if (is(shotAt + 0.72)) i.push('release', {});
       if (is(13)) {
         if (g.startDemo) { g.startDemo('2v2'); seedMatch(215); } else { g.home(); document.body.classList.add('capture-scrimmage'); }
         note.textContent = '2V2 / LIVE AI SCRIMMAGE — NORMAL MATCH RULES';

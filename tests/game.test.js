@@ -23,11 +23,31 @@ test('match is win by two, caps at 21, and a shot cannot score twice', () => {
   g.checkTimer = 0; g.resetPossession(0); g.players[1].pos.set(6, 0, 4); g.human.pos.set(0, 0, -3); cleanShot(g); advance(g, 1.5);
   assert.deepEqual(g.score, [13, 10]); assert.equal(g.phase, 'result'); g.basket(); assert.deepEqual(g.score, [13, 10]);
 });
-test('a steal changes possession and requires clearing beyond the arc', () => {
-  const g = fresh('1v1'), d = g.players[1]; g.giveBall(d); g.possession = 1; d.shield = 0; g.updateOwnedBall(0);
-  g.human.pos.copy(g.ball.pos).add(new Vec3(0, 0, 0.8)); g.human.pos.y = 0; g.human.yaw = Math.PI;
-  assert(g.trySteal(g.human)); assert.equal(g.stats.steals, 1); assert(g.needsClear); assert(!cleanShot(g));
+const guarded = (rng = () => 0.5) => {
+  // The AI dribbler faces the basket with the ball in the right hand, mid-bounce.
+  const g = new GameEngine({ rng }); g.start('1v1'); g.checkTimer = 0; g.updateAI = () => {};
+  const d = g.players[1]; g.giveBall(d); g.possession = 1; d.shield = 0; d.pos.set(0, 0, 0); d.yaw = Math.PI; d.dribble = 0;
+  g.human.pos.set(6, 0, 6); g.updateOwnedBall(0); return g;
+};
+const inFront = g => { g.human.pos.set(g.ball.pos.x, 0, g.ball.pos.z - 0.75); g.human.yaw = 0; };
+test('a steal needs the ball on your side of the dribbler, then requires clearing beyond the arc', () => {
+  const g = guarded(); inFront(g);
+  assert(g.exposure(g.human) > 0.8); assert.equal(g.trySteal(g.human), true); assert.equal(g.stats.steals, 1); assert(g.needsClear); assert(!cleanShot(g));
   g.human.pos.set(0, 0, 1); g.step(1 / 120); assert(!g.needsClear); assert(cleanShot(g));
+});
+test('reaching around the body or at a protected dribble comes up empty and leaves the defender leaning', () => {
+  const g = guarded(); g.human.pos.set(0, 0, 0.8); g.human.yaw = Math.PI;
+  assert(g.exposure(g.human) < 0.2); assert.equal(g.trySteal(g.human), false); assert(g.human.stagger > 0.2); assert.equal(g.ownerId, 2);
+  assert(g.players[1].burst > 0, 'the handler gets a step on a failed reach');
+  const h = guarded(); inFront(h); const open = h.exposure(h.human);
+  h.players[1].protect = 1; assert(h.exposure(h.human) < open * 0.6);
+  h.players[1].protect = 0; h.players[1].dribble = Math.PI / 2; h.updateOwnedBall(0); assert(h.exposure(h.human) < open * 0.8, 'the hand is on the ball at the top of the bounce');
+});
+test('getting a piece of the ball knocks it loose for either team', () => {
+  const g = guarded(() => 0.8); inFront(g);
+  assert.equal(g.trySteal(g.human), 'loose'); assert.equal(g.ownerId, null); assert.equal(g.ballState, 'loose'); assert.equal(g.stats.steals, 0);
+  assert(g.drainEvents().some(e => e.type === 'poke'));
+  advance(g, 1.2); assert(g.owner, 'someone comes up with it'); assert(Number.isFinite(g.ball.pos.x));
 });
 test('held and protected balls cannot be stolen, and reaching has a cooldown', () => {
   const g = fresh('1v1'), o = g.players[1]; g.giveBall(o); g.human.pos.copy(o.pos).add(new Vec3(0, 0, 0.8)); g.human.yaw = Math.PI;
@@ -41,8 +61,8 @@ test('dribble moves consume stamina, protect possession and can be chained', () 
 test('a defender can intercept a real pass in flight', () => {
   const g = fresh('2v2'); g.human.pos.set(0, 0, 0); g.players.find(p => p.id === 1).pos.set(4, 0, 0);
   const d = g.players.find(p => p.id === 2); d.pos.set(2, 0, 0); g.players.find(p => p.id === 3).pos.set(-6, 0, 4);
-  g.updateOwnedBall(0); assert(g.pass(g.human)); assert.equal(g.ballState, 'pass'); advance(g, 0.6);
-  assert.equal(g.ownerId, 2); assert(g.needsClear);
+  g.updateOwnedBall(0); assert(g.pass(g.human, null, 'chest')); assert.equal(g.ballState, 'pass'); advance(g, 0.6);
+  assert.equal(g.ownerId, 2); assert(g.needsClear); assert.equal(g.stats.steals, 0);
 });
 test('reaching a rising shot while jumping creates a physical block', () => {
   const g = fresh('1v1'), d = g.players[1]; d.pos.set(0, 0, -2); g.giveBall(d); d.charge = 0.72;
@@ -146,4 +166,89 @@ test('cancelling a gather discards its release and a contest player stays at the
   g.step(1 / 120, { cancelGather: true }); g.step(1 / 120, { release: {} });
   assert.equal(g.ballState, 'dribble'); assert.equal(g.stats.attempts, 0); assert.equal(g.charge, 0);
   assert.equal(g.human.pos.distanceTo(spot), 0);
+});
+
+const lane = (defenderX) => {
+  const g = fresh('2v2'); g.human.pos.set(0, 0, 0); g.players.find(p => p.id === 1).pos.set(5, 0, 0);
+  const d = g.players.find(p => p.id === 2); d.pos.set(defenderX, 0, 0); d.yaw = -Math.PI / 2; g.players.find(p => p.id === 3).pos.set(-6, 0, 5);
+  g.updateOwnedBall(0); return g;
+};
+test('the smart pass goes under a defender in the lane, over one who is close, and straight when it is open', () => {
+  for (const [x, kind] of [[3.3, 'bounce'], [1.4, 'lob'], [-3, 'chest']]) {
+    const g = lane(x); assert(g.pass(g.human)); assert.equal(g.passInfo.kind, kind);
+    let bounces = 0; for (let i = 0; i < 240 && !g.owner; i++) { g.step(1 / 120); bounces += g.drainEvents().filter(e => e.type === 'bounce').length; }
+    assert.equal(g.ownerId, 1, `${kind} pass is completed`); assert.equal(bounces, kind === 'bounce' ? 1 : 0); assert.equal(g.human.passKind, kind);
+  }
+  const g = lane(3.3); assert(g.pass(g.human, null, 'chest')); advance(g, 0.6); assert.equal(g.ownerId, 2, 'the same lane picks off a chest pass');
+});
+test('a reach at a pass in flight deflects it instead of stealing it clean', () => {
+  const g = fresh('2v2'), d = g.players.find(p => p.id === 2); g.giveBall(d); g.possession = 1; d.pos.set(0, 0, 0); d.aiWait = 0;
+  g.players.find(p => p.id === 3).pos.set(5, 0, 0); g.players.find(p => p.id === 1).pos.set(-6, 0, 5);
+  g.human.pos.set(2.2, 0, 0.9); g.human.yaw = Math.PI; g.updateOwnedBall(0);
+  assert(g.pass(d, null, 'chest')); for (let i = 0; i < 60 && g.ball.pos.x < 2; i++) g.step(1 / 120);
+  assert.equal(g.trySteal(g.human), 'loose'); assert.equal(g.ballState, 'loose'); assert.equal(g.passInfo, null);
+});
+test('a quick tap is a pump fake: no attempt, a live dribble, and a defender who bites leaves the floor', () => {
+  const g = new GameEngine({ rng: () => 0.1 }); g.start('1v1'); g.checkTimer = 0;
+  const d = g.players[1]; d.pos.set(0, 0, 0.45); g.step(1 / 120, { gather: true }); advance(g, 0.1);
+  g.step(1 / 120, { release: {} });
+  assert.equal(g.stats.attempts, 0); assert.equal(g.ballState, 'dribble'); assert.equal(g.ownerId, 0); assert(g.human.pump > 0);
+  const up = g.ball.pos.y; advance(g, 0.12); assert(g.ball.pos.y > up, 'the ball is shown'); assert(d.jump > 0 || d.jumpVel > 0, 'the defender bit');
+  assert(!g.dribbleMove(g.human, 'cross'), 'no move until the fake is finished');
+  advance(g, 0.5); assert.equal(g.human.pump, 0); assert.equal(g.ownerId, 0);
+  const steady = new GameEngine({ rng: () => 0.9 }); steady.start('1v1'); steady.checkTimer = 0; steady.players[1].pos.set(0, 0, 0.45);
+  steady.step(1 / 120, { gather: true }); advance(steady, 0.1); steady.step(1 / 120, { release: {} }); advance(steady, 0.12);
+  assert.equal(steady.players[1].jump, 0, 'a disciplined defender stays down');
+});
+test('a block needs a hand on the ball: feet on the floor do not get there, and a touch on the way down is goaltending', () => {
+  const grounded = fresh('1v1'), d = grounded.players[1]; d.pos.set(0, 0, -2); grounded.giveBall(d);
+  grounded.human.pos.set(0, 0, -2.6); grounded.human.yaw = 0; grounded.shoot(d, { aiCharge: 0.72 });
+  advance(grounded, 0.3); assert.equal(grounded.stats.blocks, 0); assert.equal(grounded.ballState, 'flight');
+  const g = fresh('1v1'), shooter = g.players[1]; shooter.pos.set(0, 0, 0.9); g.giveBall(shooter); g.human.pos.set(5, 0, 3);
+  g.shoot(shooter, { aiCharge: 0.72 }); const value = g.shot.value;
+  for (let i = 0; i < 400 && !(g.ball.vel.y < 0 && g.ball.pos.y < 3.7); i++) g.step(1 / 120);
+  assert(g.ball.pos.y > CONFIG.hoop.y); g.step(1 / 120, { hands: [g.ball.pos.clone()] });
+  assert.deepEqual(g.score, [0, value]); assert.equal(g.stats.blocks, 0); assert(g.checkTimer > 0); assert.equal(g.lastResult.label, 'GOALTENDING');
+});
+test('shot feedback names what happened: a swish, a short miss, a bank', () => {
+  const result = g => { advance(g, 2.2); return g.lastResult; };
+  const pure = fresh('practice'); cleanShot(pure); assert.equal(pure.shot.kind, 'jumper'); assert.deepEqual(result(pure), { made: true, label: 'SWISH', shooter: 0 });
+  assert.equal(pure.stats.swishes, 1);
+  const early = fresh('practice'); early.charge = 0.42; early.ballState = 'held'; early.updateOwnedBall(0); early.shoot(early.human, { aim: aim(early) });
+  assert.equal(early.shot.timing, 'EARLY'); assert(early.shot.offset < -0.25); const miss = result(early); assert.equal(miss.made, false); assert.match(miss.label, /SHORT/);
+  const glass = fresh('practice'); glass.human.pos.set(1.7, 0, -5); glass.human.locoVel.set(-1.5, 0, -1.5); glass.human.jump = 0.5;
+  glass.charge = 0.72; glass.ballState = 'held'; glass.updateOwnedBall(0); glass.shoot(glass.human, { aim: aim(glass) });
+  assert(glass.shot.layup && glass.shot.bank); assert.equal(glass.shot.value, 2); assert.match(result(glass).label, /GLASS/);
+});
+test('a move breaks ankles only when the defender is going the wrong way', () => {
+  const setup = sliding => {
+    const g = fresh('1v1'), d = g.players[1]; g.human.pos.set(0, 0, 0); g.human.yaw = Math.PI; d.pos.set(0, 0, -1.2); d.locoVel.set(sliding, 0, 0);
+    g.updateOwnedBall(0); assert(g.dribbleMove(g.human, 'cross')); return { g, d };
+  };
+  const fooled = setup(2.5); assert(fooled.d.stagger > 0.6); assert.equal(fooled.g.stats.ankles, 1); assert(fooled.g.human.burst > 0);
+  const ready = setup(-2.5); assert.equal(ready.d.stagger, 0); assert.equal(ready.g.stats.ankles, 0); assert(ready.d.react > 0, 'even a good defender needs a beat to read it');
+  assert.equal(ready.g.human.side, -1, 'the crossover changed hands');
+});
+test('a set defender holds their ground: the dribbler is stopped instead of sliding through', () => {
+  const run = wall => {
+    const g = fresh('1v1'), d = g.players[1]; g.human.pos.set(0, 0, 2); d.pos.set(wall ? 0 : 6, 0, 0.6); d.defending = true; d.yaw = 0;
+    let bumps = 0; for (let i = 0; i < 180; i++) { g.step(1 / 120, { move: { x: 0, z: -1 }, aim: { x: 0, z: -1 } }); bumps += g.drainEvents().filter(e => e.type === 'bump').length; }
+    return { z: g.human.pos.z, d: d.pos.z, bumps };
+  };
+  const free = run(false), blocked = run(true);
+  assert(free.z < -2); assert(blocked.z > free.z + 1.5); assert(blocked.z > blocked.d, 'never passes through the defender'); assert(blocked.bumps > 0); assert.equal(free.bumps, 0);
+});
+test('catch and shoot is in rhythm; putting it on the floor first is not', () => {
+  const g = fresh('2v2'), mate = g.players[1]; g.giveBall(mate); mate.pos.set(3, 0, 1); mate.aiWait = 0; g.human.pos.set(0, 0, 1);
+  for (const d of g.players.slice(2)) d.pos.set(-6, 0, -6);
+  g.updateOwnedBall(0); assert(g.pass(mate, g.human, 'chest')); for (let i = 0; i < 120 && g.ownerId !== 0; i++) g.step(1 / 120);
+  assert.equal(g.ownerId, 0); advance(g, 0.1); cleanShot(g); assert(g.shot.rhythm);
+  const h = fresh('practice'); advance(h, 1); cleanShot(h); assert(!h.shot.rhythm);
+});
+test('a tired shooter is less accurate and a fadeaway is harder to contest', () => {
+  const g = fresh('1v1'), d = g.players[1]; g.human.pos.set(0, 0, 0); d.pos.set(0, 0, -1); d.yaw = 0; d.defending = true;
+  g.human.stamina = 5; cleanShot(g); const tired = g.shot.quality, squared = g.shot.contest;
+  const f = fresh('1v1'), e = f.players[1]; f.human.pos.set(0, 0, 0); e.pos.set(0, 0, -1); e.yaw = 0; e.defending = true;
+  f.human.locoVel.set(0, 0, 1.6); cleanShot(f); assert(f.shot.fade); assert.equal(f.shot.kind, 'fadeaway'); assert(f.shot.contest < squared);
+  assert(tired < f.shot.quality + 0.2); assert(!g.shot.green);
 });

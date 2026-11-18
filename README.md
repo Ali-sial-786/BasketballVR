@@ -12,13 +12,14 @@ npm run dev
 Open **http://localhost:5173**. Click a mode and **Let’s run it**. Choose **Watch Gameplay** for an AI demo with a courtside camera; switch between 1v1, 2v2 and the three-point contest, or **Take Control** at any time. The mouse is captured when the game starts; `Esc` or `M` pauses. In Quest Browser, open the hosted **HTTPS** URL and select **Play in VR**. A laptop’s plain HTTP LAN address does not provide immersive WebXR on Quest.
 
 ```sh
-npm test          # Physics, match rules, complete AI games, tracking and real athlete rig
+npm test          # Ball physics, shot model, match rules, complete AI games, tracking, athlete rig and poses
 npm run build    # Self-contained static site in dist/
 npm run preview  # Production build on localhost:4173
 npm run test:smoke # Launches Vite + Chromium and exercises desktop/touch flows
+npm run review:motion shot # Contact sheet of the live rig: shot, handles, defense, pass, rim or views
 ```
 
-The smoke runner uses `/usr/bin/chromium` by default. Set `CHROMIUM_PATH` for another installation, and optionally `SMOKE_URL` for an already-running server. Screenshots go to `test-results/`. Fonts, models, animations and audio synthesis are served locally; there are no runtime CDN dependencies.
+The smoke runner and the motion review use `/usr/bin/chromium` by default. Set `CHROMIUM_PATH` for another installation, and optionally `SMOKE_URL` / `REVIEW_URL` for an already-running server. Screenshots and contact sheets go to `test-results/`. Fonts, models, animations and audio synthesis are served locally; there are no runtime CDN dependencies.
 
 ## Modes
 
@@ -27,24 +28,27 @@ The smoke runner uses `/usr/bin/chromium` by default. Set `CHROMIUM_PATH` for an
 | **1v1 / Iso Ball** | You against an AI opponent. First to 11, win by 2, cap 21; 2s and 3s; 18-second clock. |
 | **2v2 / Run Together** | You and AI teammate Jax against Nova and Ace. Pass, cut, call for the ball, defend your matchup. Same scoring. |
 | **3PT / Make It Rain** | Five racks, five balls each, 70 seconds. Last ball of every rack is worth 2; the entire middle rack is worth 2. Maximum **34**. A release before the buzzer counts. Personal best is saved on this device. |
-| **Shootaround** | No opponent or time limit. Automatic ball return, release feedback, handles and close-range layups and jump dunks. |
+| **Shootaround** | No opponent or time limit. Automatic ball return, a full shot report after every attempt, handles, bank layups and dunks. |
 
-After a basket, the other team checks the ball. After a defensive rebound or steal, the new offense must **clear beyond the three-point line**. Passes lead moving teammates. Receivers can run onto the pass and defenders can intercept it. The shot clock runs during passes and loose balls. Blocks, rebounds, rim bounces and the backboard use the actual ball position. Offline AI play is implemented; network multiplayer is not included.
+After a basket, the other team checks the ball. After a defensive rebound or steal, the new offense must **clear beyond the three-point line**. Passes lead moving teammates. Receivers can run onto the pass and defenders can intercept or deflect it. The shot clock runs during passes and loose balls. A shot that has touched the rim or glass is a rebound, not a block, and a ball touched on its way down is **goaltending**: the basket counts. Offline AI play is implemented; network multiplayer is not included.
 
 ## Desktop and touch
 
 | Input | Action |
 | --- | --- |
-| **WASD / arrows**, mouse | Move and look. **Shift** sprints. |
-| **Hold left mouse → release** | Gather and shoot. Release on the green band, facing the basket. Jump shots rise automatically on desktop/touch; set your feet for accuracy. |
-| **Q / E / R / C** | Crossover / behind the back / spin / stepback. Chain moves to create space. |
-| **Space** | Jump to block or rebound. Jump and shoot close to the basket to dunk. |
-| **F / right mouse** | Reach for a steal. Exposed low dribbles are vulnerable; gathered balls are protected. |
-| **Ctrl** | Defensive stance. |
-| **X** | Pass to Jax, or call for the ball when he has it. |
+| **WASD / arrows**, mouse | Move and look. **Shift** sprints. Back-pedalling and sliding are slower than running where you look. |
+| **V** | Switch between first person and the broadcast camera behind your shoulder. |
+| **Hold left mouse → release** | Gather, rise and release **at the top of your jump**, inside the green band beside the reticle. Early is short, late is long. |
+| **Tap left mouse** | Pump fake. The dribble stays alive; a defender who bites is in the air and cannot contest. |
+| **Q / Z / E** | Crossover / between the legs / behind the back. Each changes hands. |
+| **R / C / T** | Spin / stepback / hesitation. |
+| **Ctrl** | With the ball: protect it (low dribble on the far hip, arm bar). On defense: a balanced stance that slides, holds its ground and keeps a hand up. |
+| **Space** | Jump to block or rebound. Shoot inside the paint for a layup; right at the rim, with speed, to dunk. |
+| **F / right mouse** | Reach for a steal, or tip a pass that is in the air. |
+| **X / G / B** | Pass (the game picks the right one) / bounce pass / lob. **X** calls for the ball when Jax has it. |
 | **Esc / M** | Pause, restart or choose another run. |
 
-On touch screens, drag the pad to move and drag the court to look. Hold **Shoot** and release on green. All four dribble moves are available while you have the ball. In 2v2, **Pass** changes to **Call** when Jax has possession. On defense, hold **Guard** to slide or tap **Steal** or **Jump**. The contest keeps you at the active rack.
+On touch screens, drag the pad to move and drag the court to look. Hold **Shoot** and release in the green; a quick tap is a pump fake. All six handles are available while you have the ball, and **View** switches camera. In 2v2, **Pass** changes to **Call** when Jax has possession. On defense, hold **Guard** to slide or tap **Steal** or **Jump**. The contest keeps you at the active rack.
 
 ## Quest controllers
 
@@ -52,13 +56,14 @@ The default shooting hand is right; Settings can switch it. “Ball hand” and 
 
 | Input | Action |
 | --- | --- |
-| **Either grip → lift and release** | Gather, then shoot with a real upward flick. A downward release returns to a dribble. A chest-height forward throw in 2v2 passes. |
-| **Ball-hand trigger → release** | Accessible timed shooting. Gather and release on green. On defense, trigger or grip reaches for a steal. |
+| **Either grip → lift and release** | Gather, then shoot with a real upward flick. The ball leaves along your hand’s own line and arc; the difficulty level decides how much of that is forgiven. A soft flick falls short. A downward release returns to a dribble. |
+| **A real throw in 2v2** | Flat from the chest is a chest pass. Down and out is a bounce pass. |
+| **Ball-hand trigger → release** | Timed shooting. Gather and release in the green; a quick tap is a pump fake. On defense, trigger or grip reaches for a steal. |
 | **Low hand sweep across your body** | Natural crossover; sweep behind your hip for a wrap. |
-| **Ball-hand lower / upper face button** | Crossover / behind the back. |
+| **Ball-hand lower / upper face button** | Crossover / behind the back. Hold the left stick click with them for between the legs / hesitation. |
 | **Right stick up / down** | Spin / stepback. |
-| **Off-hand trigger** | Quick pass or call for the ball. |
-| **Off-hand lower face button** | Jump / block. Reaching a tracked hand into the shot path also blocks. |
+| **Off-hand trigger** | Smart pass, or call for the ball. |
+| **Off-hand lower face button** | Jump. Reaching a tracked hand into a rising shot blocks it; touching one on the way down is goaltending. |
 | **Off-hand grip** | Defensive stance. |
 | **Left stick**, click | Move; click to sprint. |
 | **Right stick left / right** | Snap turn 30° by default; smooth/off available. |
@@ -66,17 +71,39 @@ The default shooting hand is right; Settings can switch it. “Ball hand” and 
 
 Use controller straps and a clear boundary. You can stay physically in one place; thumbstick locomotion does the running. **Comfort / blink** movement and snap turning are available. Tracking loss, focus loss and pauses discard stale throws; virtual movement is excluded from measured hand velocity.
 
-## Feel and presentation
+## How it plays
 
-- Three difficulty levels adjust shooting assistance, release windows and AI. Real aiming, timing, pressure and shot form still matter.
-- Movement accelerates and brakes smoothly. Crossovers, wraps, spins and stepbacks have timed travel, low ball transfers and stamina costs. Feet plant during cuts and defensive slides; moves briefly protect the ball. Poorly timed defensive reaches leave the defender vulnerable; move chains can stagger them.
-- First-person desktop and touch use the athlete’s skinned arms. The hands switch at crossover floor contact, bring catches into the shooting pocket, and separate at release. Quest uses the tracked controller hands.
-- Drive to the lip of the rim, gather, and release above it for a downward dunk. A finish from farther out uses a layup arc. Defenders apply the most pressure from between the shooter and the basket.
+**Shooting.** The ball is a size 7 with real mass, air drag, backspin and Magnus lift, thrown at a regulation 457 mm ring and a glass board. Every shot is solved through that same flight model, then *your* errors are applied to the launch itself: speed and heading, not a target offset. That is why the same lapse that still drops from the elbow comes up short from the arc.
+
+- Hold to gather: the athlete dips, loads the legs, brings the ball up the body to a set point above the shooting eye, and rises. Release at the top of the jump. The meter beside the reticle is the motion, not a separate mini-game.
+- Early leaves the legs out of it (short); late pushes it long. The window is full size at the rim and the elbow and tightens with range.
+- A hand in your face, drifting feet and tired legs scatter the shot. A fadeaway is harder to contest but less accurate; straight off a catch you are in rhythm and the window is wider.
+- Backspin matters after the release: it checks the ball on the rim, drags a bank shot down off the glass, and decides the bounces.
+- Inside the paint a moving shooter lays it up; from the wings the layup goes off the glass. Drive right to the ring and release above it to dunk. The breakaway rim flexes.
+- Every attempt gets a report: release timing in milliseconds, shot type, contest, distance, launch arc, and what the ball did — *swish*, *rim and in*, *short · front rim*, *long · back rim*, *airball*.
+
+**Dribbling.** The live dribble rides the hand for about 40% of each beat and is pushed to the floor, not dropped. It sits waist high when you are free, goes out in front at a run, and drops to the knee on your far hip when a defender is close or you hold **protect**. Six moves: crossover, between the legs, behind the back, spin, stepback, hesitation. A move only works on a defender it actually fools: sliding the wrong way, reaching, or in the air. Then you get a first-step burst and they are a beat late. Chain moves for a combo.
+
+**Defending.** Bodies are solid: a defender in a stance holds their ground and a dribbler who runs into them is stopped. Defenders shadow the ball with the near hand and keep the other in the passing lane; on a gather the hand goes straight up.
+
+- **Steals** depend on where the ball is. In front of the dribbler and away from their hand it is there to take; behind their body, cradled in the hand, or protected, it is not. A good reach is a clean steal or a ball knocked loose; a bad one leaves you leaning while they go by.
+- **Blocks** need a hand on the ball: you have to be in the air, close, and near the top of your jump as it leaves the shooter. Once it touches rim or glass it is a rebound. On the way down it is goaltending.
+- **Pump fakes** work both ways. AI defenders decide per shot whether to leave the floor, and can be faked; AI shooters will fake you.
+
+**Passing.** Chest passes are flat and fast. Bounce passes skip once and arrive at the waist, under a defender’s hands. Lobs go over the top. The smart pass picks one from where the defenders are; you can also call each directly. Passes lead a cutting teammate, can be picked off by a defender who is looking at them, and can be tipped loose with a reach.
+
+**Opponents.** Three levels change the release window, shot assistance, and how the AI plays: how quickly a defender reads a move, how often they bite on a fake or leave their feet, how hard they reach, and how steady their own shooting touch is. AI ball handlers read which side you are sitting on, attack off a made move, fade when crowded, and hunt threes when left open.
+
+## Presentation
+
+- First person, or a broadcast camera over the ball-hand shoulder (**V**). Watch Gameplay uses a low sideline camera that travels with the play.
+- First-person desktop and touch use the athlete’s skinned arms; the shooting hand carries the ball a little wider there so it frames the rim instead of hiding it. Quest uses the tracked controller hands.
+- Athletes: shooting form with a held follow-through, one-hand finishes, two-foot stepback hop, staggered between-the-legs stance, arm bar, active defensive hands, steal lunges, block reaches, chest/bounce/lob pass releases, catches, stumbles and celebrations, all eased in body space over the retargeted clips with planted-foot IK.
+- The supplied **Mixamo `Dribble _2_.fbx`** is retargeted onto the 17-bone athlete rig and supplies the dribbling weight shift; inverse kinematics fits the hand to the live ball. Walking, running and defense blend from Crease VR’s retargeted Quaternius clips.
+- Human-proportioned, smooth-skinned athletes, full anatomical hands/fingers, faces, modeled hair and footwear, sleeveless jerseys and shorts. Approximately **56k triangles** close up; a separate **9k** distant mesh is included.
+- The Fieldhouse indoor arena: hardwood, both baskets, tiered seating, roof trusses, hanging banners, LED ribbons, a four-face jumbotron, a courtside scoreboard and a live shot clock above the glass. The crowd rises on big plays. The net is pushed open by the ball where it actually is, then whips back.
+- Sound is synthesized: a steel rim, glass, a different net for a swish than for a ball that rattled in, sneaker chirps on hard cuts, shot-clock ticks, and a crowd murmur that swells after a make, a block or a broken ankle. Haptics follow the same events in the headset.
 - Five heat points trigger a 14-second hot streak with a wider release window. Perfect makes build heat faster.
-- Human-proportioned, smooth-skinned athletes, full anatomical hands/fingers, faces, modeled hair and footwear, sleeveless jerseys and shorts. Approximately **56k triangles** close up; a separate **9k** distant mesh is included. Four player heights, skin tones and kit numbers, plus detailed sideline spectators and an instanced seated crowd. Skin and fabric have distinct physically based shading.
-- The supplied **Mixamo `Dribble _2_.fbx`** is retargeted onto the 17-bone athlete rig. Its 2.1-second take supplies the dribbling weight shift and arm motion; inverse kinematics fits the hands to the live ball. Walking, running and defense blend from Crease VR’s retargeted Quaternius clips.
-- The Fieldhouse indoor arena: full hardwood venue, both baskets, tiered seating, steel roof trusses, arena lights, LED ribbons, live four-face jumbotron and a physical courtside scoreboard. Only the near half-court is active for pickup games. A deforming net, ball backspin, restrained trails, haptics and original synthesized sounds with room reflections complete the presentation.
-- Instanced crowd geometry and matte background shading keep the arena efficient. Room reflections are applied to the hardwood and detailed athletes; broad overhead key/fill lights illuminate the venue.
 
 ## Gameplay recordings and references
 
@@ -94,17 +121,20 @@ The outdoor baseline was recorded from `fef750d` before the arena, anatomy, move
 
 | File | Purpose |
 | --- | --- |
-| `src/config.js` | Court dimensions, physics, scoring, difficulty, release windows, contest racks. |
-| `src/game/engine.js` | Pure fixed-step game simulation, AI, possession, moves, passing, defense and contest progression. |
-| `src/physics/basketball.js` | 240 Hz ball integration, swept board contact, torus rim collision, basket crossings and assisted release solver. |
+| `src/config.js` | Court and regulation ring dimensions, ball constants (drag, lift, restitution, friction), scoring, difficulty levels, release windows, contest racks. |
+| `src/physics/basketball.js` | 240 Hz ball integration with spin; rim, glass and floor contacts with friction; the launch solver; the shot error model; chest, bounce and lob pass solutions. |
+| `src/game/engine.js` | Pure fixed-step simulation: possession, shooting and shot reports, contests, blocks and goaltending, steals and loose balls, passes, body contact, contest progression. |
+| `src/game/ai.js` | Match AI for every athlete a person is not controlling. Uses the same engine methods a person does. |
+| `src/game/movement.js` | Acceleration, the six moves and their ball paths, the live dribble profile, and the path of a gathered ball through a jump shot. |
 | `src/input/` | Keyboard/touch/XR input, real-time reference-space motion history and gesture recognition. |
-| `src/render/athletes.js` | Basketball poses, motion blending and hand/foot IK. |
-| `src/render/humanoid.js`, `clips.js` | Athlete skinning, LODs, IK and animation playback adapted from Crease VR. |
-| `src/render/arena.js` | Indoor venue, hardwood, lighting, crowd, scoreboards and static mesh batching. |
-| `src/game/movement.js`, `src/render/footwork.js` | Acceleration, move timing/ball paths and planted foot IK. |
+| `src/render/athletes.js` | Basketball poses: posture, per-arm jobs eased over the clips, hand/foot IK. |
+| `src/render/humanoid.js`, `clips.js`, `footwork.js` | Athlete skinning, LODs, IK, animation playback and planted-foot stepping. |
+| `src/render/arena.js`, `effects.js` | Indoor venue, lighting, reactive crowd, net, shot clock, scoreboards, ball spin and trails. |
+| `src/audio.js` | Synthesized court sounds and crowd. |
 | `src/game/demo.js` | Contest demo commands; spectator pickup uses normal match AI. |
 | `src/xr/` | Session lifecycle, comfort preferences, world-space menu and headset HUD. |
-| `src/ui.js`, `src/style.css` | Desktop menu, HUD, results and help. |
+| `src/ui.js`, `src/style.css` | Desktop menu, HUD, release meter, shot report, results and help. |
+| `tools/review_motion.mjs` | Renders contact sheets of the live rig for reviewing poses and motion. |
 
 ## Rebuilding character assets
 
@@ -133,4 +163,4 @@ The GitHub Actions workflow tests, builds and deploys the default branch to GitH
 
 **One-time Pages setup:** open [repository Settings → Pages](https://github.com/Ali-sial-786/BasketballVR/settings/pages), set **Build and deployment → Source → GitHub Actions**, then run **Test, build and deploy RIMRUN** from the Actions tab. The GitHub connection used to build this game can push source but cannot enable Pages (GitHub returns HTTP 403 for that administrative action). Until enabled, CI still passes and publishes a downloadable `rimrun-static-site` build artifact. Once configured, the game will be at `https://ali-sial-786.github.io/BasketballVR/`.
 
-Automated tests cover the actual simulation and athlete assets, and Chromium checks cover desktop and touch controls. Physical Quest rendering, controller ergonomics, comfort and sustained headset frame rate require hardware testing. This is a playable first version for iteration, with human-like models rather than a photorealistic NBA production asset set.
+Automated tests cover the ball physics, shot model, rules, complete AI games, athlete assets and the key poses, and Chromium checks cover desktop and touch controls. Balance was tuned against seeded AI-versus-AI games and a scripted player with human-like timing and reaction lag, not against people. Physical Quest rendering, controller ergonomics, comfort, sustained headset frame rate, and how the physical shot and pass gestures feel in the hand require hardware testing. This is a playable first version for iteration, with human-like models rather than a photorealistic NBA production asset set.

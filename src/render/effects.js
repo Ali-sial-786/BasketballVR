@@ -21,6 +21,9 @@ export class Effects {
       this.particles.push({ mesh: m, life: 1.7, velocity: new THREE.Vector3((Math.random() - 0.5) * 3.5, 2 + Math.random() * 2.5, (Math.random() - 0.5) * 3.5) });
     }
   }
+  event(e) {
+    if (e.type === 'score') this.burst(new THREE.Vector3(CONFIG.hoop.x, CONFIG.hoop.y - 0.25, CONFIG.hoop.z), e.green || e.clean);
+  }
   updateTrail(engine) {
     const shot = engine.ballState === 'flight' ? engine.shot : null;
     if (!shot || shot.resolved) {
@@ -56,12 +59,18 @@ export class Effects {
     if (engine.phase !== 'playing') dt = 0;
     this.ball.material = engine.mode === 'contest' && (engine.rack === CONFIG.contest.moneyRack || engine.rackBall === CONFIG.contest.ballsPerRack - 1) ? this.gold : this.leather;
     this.ball.position.copy(engine.ball.pos);
-    if (engine.ballState === 'flight' || engine.ballState === 'pass') {
-      this.spinAxis.set(-engine.ball.vel.z, 0, engine.ball.vel.x).normalize();
-      if (this.spinAxis.lengthSq()) this.ball.rotateOnWorldAxis(this.spinAxis, dt * (engine.ballState === 'pass' ? 4 : 7.5));
-    } else if (engine.owner && engine.ballState === 'dribble' && engine.owner.action !== 'shooting') {
-      this.ball.rotation.z += dt * 2.5 * engine.owner.side;
+    const owner = engine.owner;
+    if (!owner) {
+      // The drawn ball turns with the simulated one: backspin off the fingers,
+      // and whatever the rim, glass or floor did to it afterwards.
+      const spin = engine.ball.spin, rate = Math.hypot(spin.x, spin.y, spin.z);
+      if (rate > 0.05) this.ball.rotateOnWorldAxis(this.spinAxis.set(spin.x / rate, spin.y / rate, spin.z / rate), rate * dt);
+    } else if (engine.ballState === 'dribble' && owner.action !== 'shooting') {
+      // A dribble leaves the hand with a little backspin and rolls forward off the floor.
+      this.spinAxis.set(-Math.cos(owner.yaw), 0, Math.sin(owner.yaw));
+      this.ball.rotateOnWorldAxis(this.spinAxis, dt * (2 + owner.vel.length() * 1.3) * (this.ball.position.y > this.lastBallY ? -1 : 1));
     }
+    this.lastBallY = this.ball.position.y;
     this.shadow.position.set(this.ball.position.x, 0.028, this.ball.position.z);
     const y = this.ball.position.y; this.shadow.scale.setScalar(1 + y * 0.13); this.shadow.material.opacity = 0.8 / (1 + y * 0.2);
     this.updateTrail(engine);

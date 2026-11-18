@@ -104,3 +104,83 @@ test('looking down at a crossover keeps the cut shoulders behind the first-perso
   assert.equal(view.h.armsOnly, false); assert.equal(view.h.mesh.castShadow, true);
   view.dispose(scene);
 });
+
+const posed = async (mode, prepare, frames = 1) => {
+  const { PlayerView } = await import('../src/render/athletes.js');
+  const { GameEngine } = await import('../src/game/engine.js');
+  const g = new GameEngine({ rng: () => 0.5 }); g.start(mode); g.checkTimer = 0; g.updateAI = () => {};
+  const scene = new THREE.Scene(), views = g.players.map(p => new PlayerView(scene, p));
+  const tick = (cmd = {}) => { g.step(1 / 120, cmd); g.step(1 / 120, cmd); views.forEach((v, i) => v.update(1 / 60, g.time, g.players[i], g)); };
+  await prepare(g, tick); for (let i = 0; i < frames; i++) tick();
+  const hand = (i, side) => views[i].h.worldPos('hand' + side, new THREE.Vector3());
+  const joint = (i, name) => views[i].h.worldPos(name, new THREE.Vector3());
+  return { g, views, tick, hand, joint, ball: () => new THREE.Vector3().copy(g.ball.pos), done: () => views.forEach(v => v.dispose(scene)) };
+};
+const aimAt = g => ({ x: -g.human.pos.x, y: 0, z: -6.1 - g.human.pos.z });
+
+test('a jump shot keeps the shooting hand under the ball to a set point above the head, then holds the follow-through', async () => {
+  const s = await posed('practice', async (g, tick) => { for (let i = 0; i < 20; i++) tick({ aim: aimAt(g) }); });
+  const { g, tick, hand, joint, ball } = s; let lastY = 0;
+  while (g.charge < 0.7) {
+    tick({ gather: true, aim: aimAt(g), autoJump: true });
+    if (g.charge > 0.25) {
+      // Cradled to the set point, then rolling up onto the fingertips at full extension.
+      assert(hand(0, 'R').distanceTo(ball()) < (g.charge < 0.55 ? 0.24 : 0.32), `shooting hand left the ball at ${g.charge.toFixed(2)}`);
+      if (g.charge < 0.5) assert(hand(0, 'L').distanceTo(ball()) < 0.26, 'guide hand stays on the side of the ball up to the set point');
+      assert(hand(0, 'R').y < ball().y + 0.02, 'the shooting hand is under the ball, not on top of it');
+    }
+    assert(ball().y >= lastY - 0.02, 'the ball never dips once it starts up'); lastY = ball().y;
+  }
+  assert(g.human.jump > 0.25, 'the release comes off the floor'); assert(ball().y > joint(0, 'head').y + 0.25, 'set point above the head');
+  assert(joint(0, 'elbowR').y < hand(0, 'R').y, 'elbow under the ball');
+  tick({ release: {}, aim: aimAt(g) }); assert.equal(g.human.action, 'follow');
+  for (let i = 0; i < 12; i++) tick({ aim: aimAt(g) });
+  assert(hand(0, 'R').y > joint(0, 'head').y + 0.3, 'the shooting arm stays extended'); assert(hand(0, 'L').y < hand(0, 'R').y - 0.3, 'the guide hand falls away');
+  for (let i = 0; i < 60; i++) tick({ aim: aimAt(g) });
+  assert(hand(0, 'R').y < joint(0, 'head').y, 'and comes down afterwards'); s.done();
+});
+
+test('the dribbling hand meets the ball at the top of each bounce and lets it go to the floor', async () => {
+  const { dribbleInHand } = await import('../src/game/movement.js');
+  const s = await posed('practice', async (g, tick) => { for (let i = 0; i < 30; i++) tick(); });
+  let touching = 0, apart = 0, low = 9;
+  for (let i = 0; i < 90; i++) {
+    s.tick(); const gap = s.hand(0, 'R').distanceTo(s.ball()); low = Math.min(low, s.ball().y);
+    if (dribbleInHand(s.g.human)) { assert(gap < 0.24, `hand off the ball in the contact phase (${gap.toFixed(2)})`); touching++; } else if (gap > 0.35) apart++;
+    assert(s.hand(0, 'R').y > 0.55, 'the hand never chases the ball to the floor');
+  }
+  assert(touching > 20 && apart > 10); assert(low < 0.16); s.done();
+});
+
+test('a defender shadows the ball low, puts a hand straight up on a shot, and reaches for a steal', async () => {
+  const s = await posed('1v1', async (g, tick) => {
+    const d = g.players[1]; g.giveBall(d); g.possession = 1; d.pos.set(0, 0, 0); d.yaw = Math.PI;
+    g.human.pos.set(0.2, 0, -1.3); g.human.yaw = 0;
+    for (let i = 0; i < 40; i++) tick({ defend: true, aim: { x: 0, z: 1 } });
+  });
+  const { g, tick, hand, joint } = s, low = Math.min(hand(0, 'L').y, hand(0, 'R').y), high = Math.max(hand(0, 'L').y, hand(0, 'R').y);
+  assert(low < 1.3 && high > 1.35, 'one hand on the ball, one in the passing lane');
+  const before = Math.min(hand(0, 'L').distanceTo(s.ball()), hand(0, 'R').distanceTo(s.ball()));
+  tick({ defend: true, aim: { x: 0, z: 1 }, steal: true }); for (let i = 0; i < 8; i++) tick({ defend: true, aim: { x: 0, z: 1 } });
+  assert.equal(g.human.action, 'reach'); assert(Math.min(hand(0, 'L').distanceTo(g.human.reach), hand(0, 'R').distanceTo(g.human.reach)) < before, 'the arm goes to the ball');
+  const d = g.players[1]; g.beginGather(d); d.action = 'shooting'; d.actionTime = 2; d.charge = 0.55;
+  for (let i = 0; i < 40; i++) { d.charge = 0.55; d.actionTime = 2; tick({ defend: true, aim: { x: 0, z: 1 } }); }
+  assert(Math.max(hand(0, 'L').y, hand(0, 'R').y) > joint(0, 'head').y + 0.2, 'contest hand above the head'); s.done();
+});
+
+test('passes are thrown: chest out in front, bounce pushed down, lob from overhead', async () => {
+  const heights = {};
+  for (const kind of ['chest', 'bounce', 'lob']) {
+    const s = await posed('2v2', async (g, tick) => {
+      g.human.pos.set(-2, 0, 0); g.players[1].pos.set(3, 0, 0); g.players[2].pos.set(-6, 0, -6); g.players[3].pos.set(6, 0, -6);
+      for (let i = 0; i < 20; i++) tick({ aim: { x: 1, z: 0 } });
+      tick({ aim: { x: 1, z: 0 }, pass: kind }); for (let i = 0; i < 6; i++) tick({ aim: { x: 1, z: 0 } });
+    });
+    assert.equal(s.g.human.passKind, kind); assert.equal(s.g.human.action, 'pass');
+    const left = s.hand(0, 'L'), right = s.hand(0, 'R');
+    assert(left.x > -1.95 && right.x > -1.95, `${kind}: both hands finish toward the target`);
+    if (kind !== 'lob') assert(left.x > -1.6 && right.x > -1.6, `${kind}: arms extend through the pass`);
+    heights[kind] = (left.y + right.y) / 2; s.done();
+  }
+  assert(heights.bounce < heights.chest - 0.12); assert(heights.lob > heights.chest + 0.4);
+});

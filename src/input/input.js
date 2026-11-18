@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { dribbleHand } from '../game/movement.js';
+import { dribbleHand, MOVES } from '../game/movement.js';
 import { Controller } from './controller.js';
 import { Vec3, Quat, Pose } from '../physics/math.js';
 
@@ -14,7 +14,7 @@ export class Input {
     this.yaw = Math.PI; this.pitch = -0.02; this.enabled = false; this.mouseHeld = false;
     this.touchMove = { x: 0, z: 0 }; this.touchShoot = false; this.touchGuard = false; this.lastTime = 0; this.snapArmed = true;
     this.moveArmed = true; this.gestureTime = -10; this.physicalGather = null; this.suppressRelease = false;
-    this.onPause = () => {}; this.onLook = () => {};
+    this.onPause = () => {}; this.onLook = () => {}; this.onCamera = () => {};
     window.addEventListener('keydown', e => {
       if (/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code) && this.enabled) e.preventDefault();
@@ -22,8 +22,10 @@ export class Input {
       this.keys.add(e.code);
       if (e.code === 'Escape' || e.code === 'KeyM') { this.onPause(); return; }
       if (!this.enabled || this.xr) return;
+      if (e.code === 'KeyV') { this.onCamera(); return; }
       const map = { KeyQ: ['moveAction', 'cross'], KeyE: ['moveAction', 'behind'], KeyR: ['moveAction', 'spin'],
-        KeyC: ['moveAction', 'stepback'], Space: ['jump', true], KeyF: ['steal', true], KeyX: ['pass', true] };
+        KeyC: ['moveAction', 'stepback'], KeyZ: ['moveAction', 'legs'], KeyT: ['moveAction', 'hesi'],
+        Space: ['jump', true], KeyF: ['steal', true], KeyX: ['pass', 'auto'], KeyG: ['pass', 'bounce'], KeyB: ['pass', 'lob'] };
       if (map[e.code]) this.push(...map[e.code]);
     });
     window.addEventListener('keyup', e => this.keys.delete(e.code));
@@ -141,15 +143,17 @@ export class Input {
       if (off.buttons.b.down || this.right.buttons.stick.down) this.onPause();
       if (!this.enabled) return cmd;
       if (off.buttons.a.down) cmd.jump = true;
-      if (main.buttons.a.down) cmd.moveAction = 'cross';
-      if (main.buttons.b.down) cmd.moveAction = 'behind';
+      // Held sprint turns the two face buttons into the tighter handles.
+      const tight = this.left.buttons.stick.pressed;
+      if (main.buttons.a.down) cmd.moveAction = tight ? 'legs' : 'cross';
+      if (main.buttons.b.down) cmd.moveAction = tight ? 'hesi' : 'behind';
       if (this.right.stick.y < -0.7 && !this.verticalStick) { cmd.moveAction = 'spin'; this.verticalStick = true; }
       if (this.right.stick.y > 0.7 && !this.verticalStick) { cmd.moveAction = 'stepback'; this.verticalStick = true; }
       if (Math.abs(this.right.stick.y) < 0.3) this.verticalStick = false;
       cmd.defend = off.buttons.squeeze.pressed;
       if (main.buttons.trigger.down && engine.owner?.team !== 0) cmd.steal = true;
       if (main.buttons.squeeze.down && engine.owner?.team !== 0) cmd.steal = true;
-      if (off.buttons.trigger.down) cmd.pass = true;
+      if (off.buttons.trigger.down) cmd.pass = 'auto';
       for (const c of [main, off]) if (c.tracked) cmd.hands.push(c.gripPose.p.clone());
       if (engine.ownerId === 0) {
         let c = this.physicalGather ? this[this.physicalGather] : main;
@@ -178,8 +182,11 @@ export class Input {
           if ((c.buttons.squeeze.up && this.physicalGather === c.hand) && !this.suppressRelease) {
             const v = c.releaseVelocity(this.lastTime);
             const forwardSpeed = v.dot(headForward);
-            const kind = v.y < -0.65 ? 'bounce' : engine.mode === '2v2' && v.y < 0.5 && forwardSpeed > 1.4 && cmd.hand.y < this.head.p.y - 0.12 ? 'pass' : 'shot';
-            cmd.release = { kind, velocity: v, position: cmd.hand.clone() }; this.physicalGather = null;
+            // A real throw decides what it is: down and out is a bounce pass,
+            // flat from the chest a chest pass, straight down a dribble.
+            const team = engine.mode === '2v2';
+            const kind = v.y < -0.65 ? (team && forwardSpeed > 1.3 ? 'pass' : 'bounce') : team && v.y < 0.5 && forwardSpeed > 1.4 && cmd.hand.y < this.head.p.y - 0.12 ? 'pass' : 'shot';
+            cmd.release = { kind, passKind: v.y < -0.65 ? 'bounce' : 'chest', velocity: v, position: cmd.hand.clone() }; this.physicalGather = null;
           }
         }
         if (!cmd.release && main.tracked && main.buttons.trigger.up && !this.physicalGather && !this.suppressRelease) cmd.release = {};
@@ -215,9 +222,10 @@ export class Input {
         e.preventDefault(); if (!this.enabled || pointer !== null) return; pointer = e.pointerId; button.setPointerCapture(pointer);
         const action = button.dataset.action;
         if (action === 'shoot') { this.touchShoot = true; this.push('gather', true); }
+        else if (action === 'camera') this.onCamera();
         else if (action === 'defend') this.touchGuard = true;
-        else if (['cross', 'behind', 'spin', 'stepback'].includes(action)) this.push('moveAction', action);
-        else this.push(action, true);
+        else if (MOVES.includes(action)) this.push('moveAction', action);
+        else this.push(action, action === 'pass' ? 'auto' : true);
       });
       const release = e => {
         if (e.pointerId !== pointer) return;

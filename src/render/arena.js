@@ -11,14 +11,15 @@ const palette = { steel: material(0x202e3c, { metalness: 0.58, roughness: 0.42 }
 
 export class Arena {
   constructor(scene, renderer) {
-    Object.assign(this, { scene, renderer, flash: 0, netTime: 0, rackBalls: [], spectators: [] });
-    scene.background = new THREE.Color(0x080e18); scene.fog = new THREE.FogExp2(0x0b1422, 0.0075);
+    Object.assign(this, { scene, renderer, flash: 0, netTime: 9, netKick: 0, cheer: 0, cheerGoal: 0, rimFlex: 0, rackBalls: [], spectators: [] });
+    this.crowdUniforms = { uCheer: { value: 0 }, uCrowdTime: { value: 0 } };
+    scene.background = new THREE.Color(0x0d1622); scene.fog = new THREE.FogExp2(0x101b2b, 0.006);
     const pmrem = new THREE.PMREMGenerator(renderer), room = new RoomEnvironment();
     this.environmentTarget = pmrem.fromScene(room, 0.04); this.environment = this.environmentTarget.texture;
     // Use reflections on athletes and hardwood; matte walls and the distant
     // crowd do not need the room's environment lookup on every pixel.
     room.dispose(); pmrem.dispose();
-    scene.add(new THREE.HemisphereLight(0xc8ddf4, 0x423829, 1.1));
+    scene.add(new THREE.HemisphereLight(0xd3e4f7, 0x4a3f2f, 1.45));
     const key = new THREE.DirectionalLight(0xffefdc, 3.2); key.position.set(-4, 14, 3); key.target.position.set(0, 0, 1);
     key.castShadow = true; key.shadow.mapSize.set(2048, 2048); Object.assign(key.shadow.camera, { left: -14, right: 14, top: 15, bottom: -15, near: 0.5, far: 38 });
     key.shadow.normalBias = 0.022; key.shadow.bias = -0.0001; scene.add(key, key.target); this.key = key;
@@ -83,7 +84,7 @@ export class Arena {
     for (const x of [-9.55, 9.55]) box(scene, [0.08, 0.05, 32], [x, 0.015, 6], palette.steel);
   }
   bowl() {
-    const scene = this.scene, wall = material(0x152333), riser = material(0x202b38), rail = palette.steel;
+    const scene = this.scene, wall = material(0x1c3044), riser = material(0x27364a), rail = palette.steel;
     box(scene, [46, 18, 0.5], [0, 8.9, -24], wall); box(scene, [46, 18, 0.5], [0, 8.9, 36], wall);
     for (const side of [-1, 1]) box(scene, [0.5, 18, 60], [side * 23, 8.9, 6], wall);
     const seatPieces = [new THREE.BoxGeometry(0.45, 0.07, 0.43), new THREE.BoxGeometry(0.45, 0.4, 0.08)];
@@ -104,7 +105,25 @@ export class Arena {
     const seats = new THREE.InstancedMesh(seatGeometry, material(0xffffff), locations.length), matrix = new THREE.Matrix4(), q = new THREE.Quaternion(), color = new THREE.Color();
     let seed = 817; const random = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
     const occupied = locations.filter(() => random() > 0.27);
-    const crowdMaterial = () => new THREE.MeshLambertMaterial({ color: 0xffffff });
+    // One shared pair of uniforms lifts the whole crowd out of its seats: each
+    // person bounces on their own beat, keyed from where they sit.
+    const crowdMaterial = () => {
+      const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
+      m.onBeforeCompile = shader => {
+        Object.assign(shader.uniforms, this.crowdUniforms);
+        shader.vertexShader = 'uniform float uCheer;\nuniform float uCrowdTime;\n' + shader.vertexShader.replace('#include <project_vertex>', `
+          vec4 mvPosition = vec4( transformed, 1.0 );
+          #ifdef USE_INSTANCING
+            mvPosition = instanceMatrix * mvPosition;
+            float seat = instanceMatrix[3].x * 3.71 + instanceMatrix[3].z * 2.37;
+            float keen = 0.35 + 0.65 * fract(sin(seat * 12.9898) * 43758.5453);
+            mvPosition.y += uCheer * keen * (0.1 + 0.2 * abs(sin(uCrowdTime * (6.0 + keen * 3.0) + seat)));
+          #endif
+          mvPosition = modelViewMatrix * mvPosition;
+          gl_Position = projectionMatrix * mvPosition;`);
+      };
+      return m;
+    };
     const headParts = [new THREE.SphereGeometry(1, 6, 4)];
     const nose = new THREE.SphereGeometry(0.22, 4, 2); nose.scale(0.7, 0.85, 1.2); nose.translate(0, -0.03, 0.94); headParts.push(nose);
     for (const side of [-1, 1]) { const ear = new THREE.SphereGeometry(0.17, 4, 2); ear.scale(0.5, 1.3, 0.75); ear.translate(side * 0.96, 0, 0); headParts.push(ear); }
@@ -128,10 +147,10 @@ export class Arena {
     occupied.forEach((p, i) => {
       q.setFromAxisAngle(V(0, 1, 0), p.yaw);
       const skin = [0xa57455, 0x5a3a2c, 0xd3aa82, 0x825239][i % 4];
-      matrix.compose(V(p.x, p.y + 1.12, p.z), q, V(0.105, 0.138, 0.11)); heads.setMatrixAt(i, matrix); heads.setColorAt(i, color.setHex(skin).multiplyScalar(0.52));
-      matrix.compose(V(p.x, p.y + 1.13, p.z), q, V(0.109, 0.14, 0.115)); hair.setMatrixAt(i, matrix); hair.setColorAt(i, color.setHex([0x171513, 0x352820, 0x5b4932, 0x171513, 0x78716a][i % 5]).multiplyScalar(0.65));
-      matrix.compose(V(p.x, p.y + 0.76, p.z), q, V(1, 1, 0.85)); bodies.setMatrixAt(i, matrix); bodies.setColorAt(i, color.setHex([0x2c5c68, 0x9d7657, 0x8a989b, 0x343c50, 0x9c563d, 0xc5c0a9][i % 6]).multiplyScalar(0.5));
-      limbs.setMatrixAt(i, matrix); limbs.setColorAt(i, color.setHex(skin).multiplyScalar(0.52));
+      matrix.compose(V(p.x, p.y + 1.12, p.z), q, V(0.105, 0.138, 0.11)); heads.setMatrixAt(i, matrix); heads.setColorAt(i, color.setHex(skin).multiplyScalar(0.74));
+      matrix.compose(V(p.x, p.y + 1.13, p.z), q, V(0.109, 0.14, 0.115)); hair.setMatrixAt(i, matrix); hair.setColorAt(i, color.setHex([0x171513, 0x352820, 0x5b4932, 0x171513, 0x78716a][i % 5]).multiplyScalar(0.8));
+      matrix.compose(V(p.x, p.y + 0.76, p.z), q, V(1, 1, 0.85)); bodies.setMatrixAt(i, matrix); bodies.setColorAt(i, color.setHex([0x2c5c68, 0x9d7657, 0x8a989b, 0x343c50, 0x9c563d, 0xc5c0a9, 0x1f8a7a, 0xd9825a][i % 8]).multiplyScalar(0.74));
+      limbs.setMatrixAt(i, matrix); limbs.setColorAt(i, color.setHex(skin).multiplyScalar(0.74));
     });
     scene.add(seats, heads, bodies, limbs, hair);
     for (const side of [-1, 1]) {
@@ -150,7 +169,21 @@ export class Arena {
       h.root.position.set(i % 2 ? -9.8 : 9.8, 0, -2 + Math.floor(i / 2) * 5); h.root.rotation.y = i % 2 ? Math.PI / 2 : -Math.PI / 2;
       scene.add(h.root); applyClip(h, i % 2 ? 'idle' : 'idle_fold_arms', i * 0.4); h.update(); this.spectators.push(h);
     }
-    for (const x of [-18, -6, 6, 18]) label(scene, 'RIMRUN  /  2026', 3.6, 4.8, [x, 11.5, -23.7], { background: x < 0 ? '#163b49' : '#653f31', color: '#e4ca9e', font: '900 58px Arial' });
+    // Hanging banners, drawn at their own proportions so the lettering is crisp.
+    [[-18, 'FIELDHOUSE', 'EST. 2026', '#163b49'], [-6, 'RIMRUN', 'ALL HEART', '#1d4a55'], [6, 'RIMRUN', 'ALL HOOPS', '#7a4a36'], [18, 'CHAMPIONS', 'PICKUP LEAGUE', '#653f31']].forEach(([x, title, sub, background]) => {
+      const texture = canvasTexture(512, 704, (c, w, h) => {
+        c.fillStyle = background; c.fillRect(0, 0, w, h);
+        c.strokeStyle = '#e4ca9e'; c.lineWidth = 6; c.strokeRect(22, 22, w - 44, h - 44);
+        c.fillStyle = '#e4ca9e'; c.textAlign = 'center';
+        c.font = '900 34px Arial'; c.fillText('T H E', w / 2, 150);
+        c.font = 'italic 900 92px Arial'; c.fillText(title, w / 2, 290, w - 90);
+        c.fillRect(w / 2 - 70, 330, 140, 5);
+        c.font = '900 150px Arial'; c.fillText('26', w / 2, 500);
+        c.font = '700 30px Arial'; c.fillText(sub.split('').join(' '), w / 2, 600, w - 90);
+      });
+      texture.anisotropy = 4;
+      mesh(new THREE.PlaneGeometry(3.6, 4.95), new THREE.MeshBasicMaterial({ map: texture }), scene, [x, 11.5, -23.7]);
+    });
   }
   roof() {
     const scene = this.scene, roofMat = material(0x111c29), lightMat = new THREE.MeshBasicMaterial({ color: 0xc3dbed, toneMapped: false });
@@ -202,19 +235,31 @@ export class Arena {
     for (const y of [3.035, 3.465]) box(scene, [0.6, 0.025, 0.045], [0, y, b.z + 0.025], palette.cream);
     box(scene, [0.18, 0.06, 0.25], [0, h.y, b.z + 0.11], palette.coral);
     this.rimMaterial = material(0xff642c, { metalness: 0.35, roughness: 0.35, emissive: 0xff6a25, emissiveIntensity: 0.08 });
-    const rim = mesh(new THREE.TorusGeometry(h.radius, h.tube, 8, 48), this.rimMaterial, scene, [0, h.y, h.z]); rim.rotation.x = Math.PI / 2;
-    this.net = new THREE.Group(); this.net.position.set(0, h.y, h.z); scene.add(this.net);
+    // The ring and net hang from one pivot at the glass so a dunk can flex them.
+    this.rimPivot = new THREE.Group(); this.rimPivot.position.set(0, h.y, b.z + 0.02); scene.add(this.rimPivot);
+    const rim = mesh(new THREE.TorusGeometry(h.radius, h.tube, 10, 56), this.rimMaterial, this.rimPivot, [0, 0, h.z - b.z - 0.02]); rim.rotation.x = Math.PI / 2;
+    this.net = new THREE.Group(); this.net.position.set(0, 0, h.z - b.z - 0.02); this.rimPivot.add(this.net);
     const points = [];
     for (let i = 0; i < 16; i++) {
       const angle = i / 16 * Math.PI * 2;
       for (let row = 0; row < 4; row++) {
-        const y1 = -row * 0.12, y2 = -(row + 1) * 0.12, r1 = 0.225 - row * 0.024, r2 = r1 - 0.024;
+        const y1 = -row * 0.11, y2 = -(row + 1) * 0.11, r1 = h.radius - 0.008 - row * 0.027, r2 = r1 - 0.027;
         for (const side of [-1, 1]) { const a1 = angle + (row % 2 ? Math.PI / 16 : 0), a2 = a1 + side * Math.PI / 16;
           points.push(Math.cos(a1) * r1, y1, Math.sin(a1) * r1, Math.cos(a2) * r2, y2, Math.sin(a2) * r2); }
       }
     }
     this.net.add(new THREE.LineSegments(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(points, 3)), new THREE.LineBasicMaterial({ color: 0xf7ecd4, transparent: true, opacity: 0.9 })));
     this.netRest = new Float32Array(points);
+    // Shot clock on top of the glass, readable from anywhere on the floor.
+    this.clockCanvas = document.createElement('canvas'); this.clockCanvas.width = 256; this.clockCanvas.height = 128;
+    this.clockTexture = new THREE.CanvasTexture(this.clockCanvas); this.clockTexture.colorSpace = THREE.SRGBColorSpace;
+    box(scene, [0.74, 0.4, 0.12], [0, b.y + b.height / 2 + 0.25, b.z], palette.steel);
+    const clockFace = mesh(new THREE.PlaneGeometry(0.66, 0.33), new THREE.MeshBasicMaterial({ map: this.clockTexture, toneMapped: false }), scene, [0, b.y + b.height / 2 + 0.25, b.z + 0.065]);
+    clockFace.name = 'shot-clock';
+    // Red light strips around the glass fire with the horn.
+    this.boardLight = new THREE.MeshBasicMaterial({ color: 0xff3b2f, transparent: true, opacity: 0, toneMapped: false, depthWrite: false });
+    for (const x of [-0.935, 0.935]) box(scene, [0.02, b.height + 0.05, 0.02], [x, b.y, b.z + 0.03], this.boardLight);
+    for (const y of [b.y - b.height / 2 - 0.02, b.y + b.height / 2 + 0.02]) box(scene, [b.width + 0.07, 0.02, 0.02], [0, y, b.z + 0.03], this.boardLight);
     // Physical scoreboard is readable inside the headset.
     this.boardCanvas = document.createElement('canvas'); this.boardCanvas.width = 1024; this.boardCanvas.height = 320;
     this.boardTexture = new THREE.CanvasTexture(this.boardCanvas); this.boardTexture.colorSpace = THREE.SRGBColorSpace;
@@ -244,8 +289,8 @@ export class Arena {
     this.scene.updateMatrixWorld(true);
     const groups = new Map();
     this.scene.traverse(m => {
-      if (!m.isMesh || m.isSkinnedMesh || m.isInstancedMesh || Array.isArray(m.material) || m.material.isShaderMaterial || m.material.transparent || m.material.map || m.material === this.rimMaterial) return;
-      let p = m; while (p) { if (p === this.rackGroup || p === this.net) return; p = p.parent; }
+      if (!m.isMesh || m.isSkinnedMesh || m.isInstancedMesh || Array.isArray(m.material) || m.material.isShaderMaterial || m.material.transparent || m.material.map || m.material === this.rimMaterial || m.material === this.boardLight) return;
+      let p = m; while (p) { if (p === this.rackGroup || p === this.rimPivot) return; p = p.parent; }
       const group = groups.get(m.material) || []; group.push(m); groups.set(m.material, group);
     });
     for (const [mat, objects] of groups) {
@@ -278,22 +323,68 @@ export class Arena {
     this.boardTexture.needsUpdate = true;
   }
 
-  update(dt, engine) {
-    this.flash = Math.max(0, this.flash - dt); this.rimMaterial.emissiveIntensity = 0.08 + this.flash * 2;
-    this.netTime = Math.max(0, this.netTime - dt);
-    if (this.netTime > 0 || this.netWasMoving) {
-      const attribute = this.net.children[0].geometry.attributes.position;
-      for (let i = 0; i < attribute.count; i++) {
-        const x = this.netRest[i * 3], y = this.netRest[i * 3 + 1], z = this.netRest[i * 3 + 2], weight = -y / 0.48;
-        const wave = Math.sin((0.8 - this.netTime) * 24 - weight * 3) * this.netTime * weight;
-        attribute.setXYZ(i, x * (1 + wave * 0.34) + wave * 0.035, y - Math.abs(wave) * 0.06, z * (1 + wave * 0.28));
+  drawClock(engine) {
+    const live = engine.mode === '1v1' || engine.mode === '2v2';
+    const text = live ? String(Math.max(0, Math.ceil(engine.shotClock))) : engine.mode === 'contest' ? String(Math.ceil(engine.contestTime)) : '--';
+    if (this.clockKey === text) return;
+    this.clockKey = text;
+    const c = this.clockCanvas.getContext('2d'); c.fillStyle = '#0b0f12'; c.fillRect(0, 0, 256, 128);
+    const urgent = live && engine.shotClock <= 5 || engine.mode === 'contest' && engine.contestTime <= 10;
+    c.fillStyle = urgent ? '#ff4a3a' : '#ffb347'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.font = '900 104px Arial'; c.fillText(text, 128, 70);
+    this.clockTexture.needsUpdate = true;
+  }
+
+  // The net is pushed open where the ball actually is on its way through,
+  // dragged down with it, then whips back and settles.
+  updateNet(dt, engine) {
+    const h = CONFIG.hoop, ball = engine.ball, depth = h.y - ball.pos.y;
+    const inside = ball.scored && depth > -0.05 && depth < 0.5 && Math.hypot(ball.pos.x - h.x, ball.pos.z - h.z) < 0.3;
+    this.netTime += dt;
+    if (inside) this.netTime = 0;
+    const settled = !inside && this.netTime > 1.4;
+    if (settled && !this.netWasMoving) return;
+    const attribute = this.net.children[0].geometry.attributes.position, t = this.netTime, whip = Math.exp(-t * 4.2) * this.netKick;
+    for (let i = 0; i < attribute.count; i++) {
+      const x = this.netRest[i * 3], y = this.netRest[i * 3 + 1], z = this.netRest[i * 3 + 2], weight = -y / 0.44;
+      let widen = 0, drop = 0, sway = 0;
+      if (!settled) {
+        if (inside) {
+          const near = Math.exp(-Math.pow((depth - -y) / 0.13, 2));
+          widen = near * 0.55 * weight + 0.08 * weight; drop = Math.max(0, depth - 0.1) * 0.22 * weight;
+        }
+        widen += Math.sin(t * 21 - weight * 2.6) * whip * 0.3 * weight;
+        drop += Math.abs(Math.cos(t * 13)) * whip * 0.09 * weight - whip * 0.05 * weight;
+        sway = Math.sin(t * 16 + 1) * whip * 0.05 * weight;
       }
-      attribute.needsUpdate = true; this.netWasMoving = this.netTime > 0;
+      attribute.setXYZ(i, x * (1 + widen) + sway, y - drop, z * (1 + widen));
     }
+    attribute.needsUpdate = true; this.netWasMoving = !settled;
+  }
+
+  update(dt, engine, now = 0) {
+    this.flash = Math.max(0, this.flash - dt); this.rimMaterial.emissiveIntensity = 0.08 + this.flash * 2;
+    this.updateNet(dt, engine);
+    // A dunk bends the breakaway ring down and lets it spring back.
+    this.rimFlex = Math.max(0, this.rimFlex - dt);
+    this.rimPivot.rotation.x = this.rimFlex > 0 ? Math.sin(this.rimFlex * 22) * 0.12 * this.rimFlex / 0.7 + 0.1 * Math.pow(this.rimFlex / 0.7, 2) : 0;
+    // The building swells after a big play and settles on its own.
+    this.cheerGoal = Math.max(0, this.cheerGoal - dt * 0.55);
+    this.cheer += (Math.min(1, this.cheerGoal) - this.cheer) * (1 - Math.exp(-dt * (this.cheerGoal > this.cheer ? 9 : 2.2)));
+    this.crowdUniforms.uCheer.value = this.cheer; this.crowdUniforms.uCrowdTime.value = now;
+    this.buzzer = Math.max(0, (this.buzzer || 0) - dt); this.boardLight.opacity = this.buzzer > 0 ? 0.95 : 0;
     this.rackGroup.visible = engine.mode === 'contest' && !engine.preview;
     if (this.rackGroup.visible) this.rackBalls.forEach((b, i) => { b.visible = i > engine.rack * 5 + engine.rackBall; });
     this.boardTick = (this.boardTick || 0) + dt;
-    if (this.boardTick > 0.15) { this.boardTick = 0; this.drawScore(engine); }
+    if (this.boardTick > 0.15) { this.boardTick = 0; this.drawScore(engine); this.drawClock(engine); }
   }
-  score() { this.flash = 0.8; this.netTime = 0.8; }
+  event(e) {
+    if (e.type === 'net') { this.netKick = Math.min(1.5, 0.55 + (e.speed || 3) * 0.12) * (e.clean ? 1.15 : 0.8); this.netTime = 0; this.netWasMoving = true; }
+    else if (e.type === 'score') { this.flash = 0.8; this.cheerGoal = Math.max(this.cheerGoal, e.dunk ? 2.2 : e.value === 3 || e.green ? 1.7 : 1.2); if (e.dunk) this.rimFlex = 0.7; }
+    else if (e.type === 'block') this.cheerGoal = Math.max(this.cheerGoal, e.swat ? 1.5 : 0.9);
+    else if (e.type === 'steal' || e.type === 'move' && e.broke) this.cheerGoal = Math.max(this.cheerGoal, 1);
+    else if (e.type === 'rim' && e.speed > 2.5) this.rimFlex = Math.max(this.rimFlex, 0.12);
+    else if (e.type === 'buzzer') this.buzzer = 1.1;
+    else if (e.type === 'whistle') this.buzzer = 0.45;
+    else if (e.type === 'finish') this.cheerGoal = 2.6;
+  }
 }

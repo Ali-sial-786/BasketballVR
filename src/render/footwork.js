@@ -7,25 +7,29 @@ const smooth = t => t * t * (3 - 2 * t);
 export class Footwork {
   constructor() { this.feet = null; this.swing = null; this.last = 'R'; this.lastRoot = null; this.airborne = false; }
   reset() { this.feet = null; this.swing = null; }
-  update(dt, player, h, gathered) {
+  // stance: { width, lead: 'L' | 'R', split } staggers the feet front to back.
+  // hop: extra height of the body that the feet should leave the floor with.
+  update(dt, player, h, gathered, stance = null, hop = 0) {
     h.update();
-    const root = h.root, scale = root.scale.y, speed = player.vel.length();
+    const root = h.root, scale = root.scale.y, speed = player.vel.length(), jump = player.jump + hop;
     const nominal = {};
-    const width = player.defending ? 0.25 : gathered ? 0.14 : 0.17;
+    const width = stance?.width ?? (player.defending ? 0.25 : gathered ? 0.15 : 0.17);
+    const strong = player.side > 0 ? 'R' : 'L';
     for (const side of ['L', 'R']) {
       const sign = side === 'L' ? 1 : -1;
-      nominal[side] = root.localToWorld(V(sign * width, h.ankleHeight, gathered ? sign * 0.06 : 0.035));
-      nominal[side].y = player.jump + h.ankleHeight * scale + 0.013;
+      const ahead = stance ? (side === stance.lead ? stance.split : -stance.split * 0.45) : gathered ? (side === strong ? 0.07 : -0.03) : 0.035;
+      nominal[side] = root.localToWorld(V(sign * width, h.ankleHeight, ahead));
+      nominal[side].y = jump + h.ankleHeight * scale + 0.013;
     }
     const moved = !this.lastRoot || this.lastRoot.distanceTo(root.position) > 1.7;
     if (!this.feet || moved) { this.feet = { L: nominal.L.clone(), R: nominal.R.clone() }; this.swing = null; }
     this.lastRoot = root.position.clone();
-    if (player.jump > 0.025) {
+    if (jump > 0.025) {
       this.airborne = true; this.swing = null;
-      const tuck = Math.min(1, player.jump / 0.28);
+      const tuck = Math.min(1, jump / 0.28);
       for (const side of ['L', 'R']) {
         const lead = player.action === 'layup' && side === (player.side > 0 ? 'R' : 'L');
-        const lift = lead ? 0.28 : 0.06, reach = lead ? 0.16 : -0.09;
+        const lift = lead ? 0.3 : hop ? 0.02 : 0.07, reach = lead ? 0.18 : hop ? 0 : -0.1;
         this.feet[side].copy(nominal[side]).add(V(0, lift * tuck, reach * tuck).applyQuaternion(root.quaternion));
       }
     } else {
