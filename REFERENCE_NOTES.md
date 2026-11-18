@@ -68,3 +68,18 @@ The build environment could reach GitHub (git and raw files), npm and PyPI only.
 | CMU motion capture: jump shot (124_05), dribbles (06_02–15), defensive moves (102_22–28) via una-dinosauria/cmu-mocap | Free for research and commercial use, with acknowledgment | Not yet: needs a BVH retarget onto the 17-bone rig |
 | three.js example hardwood textures | No stated texture licence | No |
 | Mixamo, Sketchfab models, Bandai-Namco motion set | Login / non-redistributable / non-commercial | No |
+
+## Uniform pass
+
+What a modern basketball uniform looks like, and how each trait is reproduced:
+
+| Trait | In the game |
+| --- | --- |
+| Loose sleeveless jersey with deep armholes, worn out over the shorts | Jersey hem at 0.915 m (bind pose), draped over the body and over the finished shorts |
+| Baggy shorts ending just above the knee, dropped crotch | Shorts hem at 0.59 m; the cloth spans from leg to leg across the front and the seat, then parts into wide legs |
+| Cloth hangs from the chest, shoulder blades, hips and seat rather than following the waist | Hang pass: no point of the cloth sits further in than the cloth above it, less a small fall-in; then relaxed taut |
+| Eyelet mesh polyester with a soft sheen | Pin-hole pattern (fades out before it can shimmer), sheen lobe tinted by the cloth colour, knit normal map |
+| Tackle-twill name and numbers with a contrast outline, 10 cm on the chest and about 17 cm on the back | Print atlas per player, projected in bind space, raised from the cloth and a little glossier than it |
+| Contrast side panels with piping; rib-knit neck, armhole and waist bindings; twin-needle hems | Painted in bind space by the kit shader |
+
+Building note: with bpy 5.3 a new shape key starts from the current mix of the others, so every expression key compounded the ones before it (the head came out as a disc). `tools/rebuild_anatomy.py` now creates each key from the basis alone, which is correct in every Blender version.

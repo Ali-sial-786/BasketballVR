@@ -15,7 +15,9 @@ const require = createRequire(import.meta.url);
 const { MeshoptSimplifier } = require('meshoptimizer');
 await MeshoptSimplifier.ready;
 const root = new URL('../public/', import.meta.url);
-globalThis.document = { createElement: () => ({ getContext: () => ({ createRadialGradient: () => ({ addColorStop() {} }), fillRect() {}, fillText() {} }) }) };
+// A canvas that accepts any drawing call and draws nothing.
+const inertContext = new Proxy({ createRadialGradient: () => ({ addColorStop() {} }) }, { get: (target, key) => target[key] ?? (() => {}), set: () => true });
+globalThis.document = { createElement: () => ({ getContext: () => inertContext }) };
 globalThis.fetch = async url => { const b = await fs.readFile(new URL(url, root)); return { ok: true, json: async () => JSON.parse(b), arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) }; };
 const { loadAthlete, Humanoid } = await import('../src/render/humanoid.js');
 await loadAthlete('assets/models/');

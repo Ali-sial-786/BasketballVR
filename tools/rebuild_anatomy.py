@@ -170,9 +170,9 @@ for poly in body.data.polygons:
         poly.material_index=1
 
 # Expression shapes are built on the final exported topology.
-body.shape_key_add(name='Basis')
+body.shape_key_add(name='Basis',from_mix=False)
 for name in ['FaceNarrow','FaceRound','FaceSoft','EyesOpen','Smile','MouthSerious','BrowsRaised','Blink','HandGrip']:
-    key = body.shape_key_add(name=name)
+    key = body.shape_key_add(name=name,from_mix=False)
     if name=='HandGrip': continue
     for i, v in enumerate(body.data.vertices):
         x,y,z=v.co; mask=max(0.,min(1.,(z-1.57)/.10)); front=max(0.,min(1.,(-y-.065)/.07))
@@ -225,6 +225,126 @@ def interpolate(a,b,t):
     ww={k:a[2].get(k,0.)*(1-t)+b[2].get(k,0.)*t for k in set(a[2])|set(b[2])}
     return pos,uv,ww
 
+# ---- tailoring ------------------------------------------------------------
+# A basketball uniform is cut loose and hangs. Offsetting the body along its
+# normals only makes a thicker body, so the two garments are draped instead:
+# eased off the skin, dropped from whatever part of the body holds the cloth
+# out above (chest, shoulder blades, hips, seat), relaxed until the surface is
+# taut, and kept clear of the body throughout.
+SHIRT_HEM=.915;SHORTS_HEM=.590
+_tight_ids=sorted({i for f in groups['helper-tights'] for i,u in f});_tight_map={old:new for new,old in enumerate(_tight_ids)}
+tights_bvh=BVHTree.FromPolygons([verts[i] for i in _tight_ids],[[_tight_map[i] for i,u in f] for f in groups['helper-tights']])
+_probe=Vector((1.,0.,1.2));_hit,_normal,_,_=tights_bvh.find_nearest(_probe);TIGHTS_SIGN=1. if (_probe-_hit).dot(_normal)>0 else -1.
+CROTCH=min(verts[i].z for i in _tight_ids if abs(verts[i].x)<.012 and verts[i].z>.7)
+def hull2d(points):
+    points=sorted(set(points))
+    def half(seq):
+        out=[]
+        for q in seq:
+            while len(out)>1 and (out[-1][0]-out[-2][0])*(q[1]-out[-2][1])-(out[-1][1]-out[-2][1])*(q[0]-out[-2][0])<=0:out.pop()
+            out.append(q)
+        return out[:-1]
+    return half(points)+half(points[::-1])
+def ray_exit(p,d,hull):
+    # Distance from p, inside a convex outline, to the outline along d.
+    best=0.
+    for (ax,ay),(bx,by) in zip(hull,hull[1:]+hull[:1]):
+        ex=bx-ax;ey=by-ay;den=d.x*ey-d.y*ex
+        if abs(den)<1e-9:continue
+        t=((ax-p.x)*ey-(ay-p.y)*ex)/den;u=((ax-p.x)*d.y-(ay-p.y)*d.x)/den
+        if t>0. and -1e-6<=u<=1.+1e-6:best=max(best,t)
+    return best
+OVER=[]   # finished garments that later ones are worn over
+def smooth01(t):t=max(0.,min(1.,t));return t*t*(3.-2.*t)
+def tailor(obj,name):
+    shirt=name=='Performance_Polo';me=obj.data
+    lip=[(not shirt) and v.co.z<SHORTS_HEM-.004 for v in me.vertices]   # turned under at the leg opening
+    def ease(p,n):
+        if shirt:return .012+.018*smooth01((1.40-p.z)/.44)
+        outward=n.x*(1. if p.x>0 else -1.)
+        return .012+.054*smooth01((1.02-p.z)/.40)*(.2+.8*smooth01(outward*.7+.5))
+    eased=[]
+    for i,v in enumerate(me.vertices):
+        e=.004 if lip[i] else ease(v.co,v.normal);eased.append(e);v.co+=v.normal*e
+    me.update()
+    if not shirt:
+        # One garment, not two sleeves: across the seat and the front the cloth
+        # spans from leg to leg down to a dropped crotch, then parts into the legs.
+        levels={}
+        for i,v in enumerate(me.vertices):
+            if lip[i]:continue
+            for k in range(int((v.co.z-.016)*100),int((v.co.z+.016)*100)+1):levels.setdefault(k,[]).append((v.co.x,v.co.y))
+        hulls={k:hull2d(points) for k,points in levels.items() if len(points)>5}
+        for i,v in enumerate(me.vertices):
+            amount=smooth01((v.co.z-(CROTCH-.105))/.085)*(1.-smooth01((v.co.z-(CROTCH+.07))/.10));hull=hulls.get(int(round(v.co.z*100)))
+            if lip[i] or amount<=0. or not hull:continue
+            d=Vector((v.normal.x,v.normal.y,0.))
+            if d.length<.35:continue
+            d.normalize();centre=sum((Vector((x,y,0.)) for x,y in hull),Vector())/len(hull);radial=Vector((v.co.x-centre.x,v.co.y-centre.y,0.))
+            if radial.length<1e-5:continue
+            if d.dot(radial.normalized())<.2:
+                # Facing the other leg: left alone between the thighs, drawn straight out across the seat.
+                if v.co.z<CROTCH+.012:continue
+                d=radial.normalized()
+            v.co+=d*amount*min(.07,ray_exit(v.co,d,hull))
+        me.update()
+    # Hang: cloth cannot sit further in than the cloth above it, less a small fall-in.
+    P=[v.co.copy() for v in me.vertices];D=[]
+    for v in me.vertices:
+        h=Vector((v.normal.x,v.normal.y,0.));D.append(h.normalized() if h.length>.35 else None)
+    fall=.07 if shirt else .045;top=1.37 if shirt else 1.02
+    for i,v in enumerate(me.vertices):
+        d=D[i];p=P[i]
+        if d is None or lip[i] or p.z>top:continue
+        inner=(not shirt) and p.z<.90 and d.x*(1. if p.x>0 else -1.)<-.25
+        if inner:continue
+        best=0.
+        for j,q in enumerate(P):
+            dz=q.z-p.z
+            if dz<.004 or D[j] is None or lip[j] or d.dot(D[j])<.80:continue
+            if (not shirt) and p.z<.88 and p.x*q.x<0:continue
+            dx=q.x-p.x;dy=q.y-p.y;out=d.x*dx+d.y*dy
+            if out<=0. or out>.07 or abs(d.x*dy-d.y*dx)>.045:continue
+            best=max(best,out-fall*dz)
+        if best>0.:v.co+=d*min(best,.05)
+    me.update()
+    # Relax to a taut surface (heights are kept), never closer to the body than the ease allows.
+    for round_ in range(7):
+        bm=bmesh.new();bm.from_mesh(me)
+        bmesh.ops.smooth_vert(bm,verts=[v for v in bm.verts if not lip[v.index]],factor=.5,use_axis_x=True,use_axis_y=True,use_axis_z=False)
+        bm.to_mesh(me);bm.free();me.update()
+        for i,v in enumerate(me.vertices):
+            hit,normal,_,distance=tights_bvh.find_nearest(v.co)
+            if hit is None:continue
+            gap=(v.co-hit).dot(normal)*TIGHTS_SIGN;need=eased[i]*(.5 if lip[i] else .85)
+            if gap<need:v.co+=normal*TIGHTS_SIGN*(need-gap)
+            for under in OVER:
+                hit,normal,_,distance=under.find_nearest(v.co)
+                if hit is None or distance>.06 or D[i] is None:continue
+                # (the finished shell is closed at its rims, so its face normals point out of it)
+                gap=(v.co-hit).dot(normal)
+                if gap<.009 and normal.dot(D[i])>.2:v.co+=D[i]*(.009-gap)
+    # Soft folds where the cloth gathers: above the hem of the jersey, down the legs of the shorts.
+    for i,v in enumerate(me.vertices):
+        if D[i] is None or lip[i]:continue
+        p=v.co;around=math.atan2(p.x,-p.y)
+        if shirt:
+            amount=smooth01((1.26-p.z)/.16)*.0026
+            v.co+=D[i]*amount*(math.sin(around*9.+p.z*21.)+.6*math.sin(around*17.-p.z*33.+1.3))
+        else:
+            amount=smooth01((1.0-p.z)/.14)*.0030
+            v.co+=D[i]*amount*(math.sin(around*7.+p.z*26.+p.x*9.)+.6*math.sin(around*15.-p.z*41.+.7))
+    # Crisp horizontal hems; the turned-under lip sits just inside the opening.
+    for i,v in enumerate(me.vertices):
+        if shirt:
+            if v.co.z<SHIRT_HEM+.004:v.co.z=SHIRT_HEM
+            if v.co.z>1.484:v.co.z=1.490
+        else:
+            if lip[i]:v.co.z=SHORTS_HEM+.008
+            elif v.co.z<SHORTS_HEM+.012:v.co.z=SHORTS_HEM
+            if v.co.z>1.085:v.co.z=1.087
+    me.update()
+
 garment_boundaries={}
 def clipped_source(name, faces, mat, fields, inflate):
     vs,fs,tex,ww=[],[],[],[]
@@ -250,16 +370,10 @@ def clipped_source(name, faces, mat, fields, inflate):
     for poly in obj.data.polygons:
         for loop,idx in zip(poly.loop_indices,poly.vertices):uv.data[loop].uv=tex[idx]
     recalc(obj,True)
-    for v in obj.data.vertices:v.co+=v.normal*inflate
+    if name in ('Performance_Polo','Tailored_Shorts'):tailor(obj,name)
+    else:
+        for v in obj.data.vertices:v.co+=v.normal*inflate
     obj.data.update()
-    # Preserve crisp horizontal hems after the normal offset.
-    for v in obj.data.vertices:
-        if name=='Performance_Polo':
-            if v.co.z<1.091:v.co.z=1.080
-            if v.co.z>1.484:v.co.z=1.490
-        elif name=='Tailored_Shorts':
-            if v.co.z<.817:v.co.z=.805
-            if v.co.z>1.085:v.co.z=1.087
     subdivide(obj,1)
     # Rim-only thickness keeps sewn openings solid without doubling every cloth face.
     bm=bmesh.new();bm.from_mesh(obj.data);adj={}
@@ -278,9 +392,11 @@ def clipped_source(name, faces, mat, fields, inflate):
     solid=obj.modifiers.new('Baked fabric thickness','SOLIDIFY');solid.thickness=.0025;solid.offset=-.15;solid.use_rim_only=True;bake(obj,solid)
     recalc(obj)
     return obj
-shirtfields=[lambda p:p.z-1.080,lambda p:1.491-p.z,lambda p:max(.236-abs(p.x),.148-sleeve_distance(p)),lambda p:max(p.y+.056,abs(p.x)-max(0.,(p.z-1.438)*.47))]
+shirtfields=[lambda p:p.z-SHIRT_HEM,lambda p:1.491-p.z,lambda p:max(.236-abs(p.x),.148-sleeve_distance(p)),lambda p:max(p.y+.056,abs(p.x)-max(0.,(p.z-1.438)*.47))]
+pants=clipped_source('Tailored_Shorts',groups['helper-tights'],shortmat,[lambda p:p.z-(SHORTS_HEM-.03),lambda p:1.087-p.z],.018)
+# The jersey is worn out, over the shorts: it is draped over them as well as over the body.
+OVER.append(BVHTree.FromPolygons([v.co for v in pants.data.vertices],[list(p.vertices) for p in pants.data.polygons]))
 tee=clipped_source('Performance_Polo',groups['helper-tights'],shirtmat,shirtfields,.013)
-pants=clipped_source('Tailored_Shorts',groups['helper-tights'],shortmat,[lambda p:p.z-.745,lambda p:1.087-p.z],.018)
 # The kit has a readable original identity at the broadcast distance: an angled
 # shoulder yoke, bounded sleeve cuffs and a side inset rather than tiny decoration.
 # Clip actual fabric triangles for clean panel borders instead of recoloring
@@ -297,15 +413,6 @@ for sign in [-1,1]:
     clipped_source('Short side inset'+str(sign),groups['helper-tights'],accent,
                    [lambda p:p.z-.833,lambda p:1.061-p.z,
                     lambda p,s=sign:s*p.x-(.142+.025*(1.061-p.z)/.228)],.041)
-# Fine cloth folds are sculpted into the fabric rather than disconnected plates.
-for v in tee.data.vertices:
-    p=v.co
-    if p.z<1.30 and abs(p.x)<.20:
-        fade=max(0.,1.-abs(p.z-1.15)/.13);p.y+=math.sin(p.z*102+abs(p.x)*23)*.0019*fade
-for v in pants.data.vertices:
-    p=v.co;fade=max(0.,min(1.,(1.07-p.z)/.12))*max(0.,min(1.,(p.z-.745)/.06))
-    p.y+=math.sin(p.z*61+abs(p.x)*19)*.0024*fade
-
 # Smooth skinned accessories have baked placement and compact material batches.
 def sphere(name,loc,size,mat,bone='head',segments=20,rings=12):
     bpy.ops.object.select_all(action='DESELECT');bpy.ops.mesh.primitive_uv_sphere_add(segments=segments,ring_count=rings,location=loc)
@@ -491,8 +598,8 @@ lids=merge(blink_lids,'Details_Lids')
 # Closed lid shapes live inside the head at rest and emerge only during the
 # brief blink. Real eyelids cover the globe without folding the cheek mesh.
 for v in lids.data.vertices:v.co.y+=.042
-lids.shape_key_add(name='Basis')
-lid_close=lids.shape_key_add(name='Blink')
+lids.shape_key_add(name='Basis',from_mix=False)
+lid_close=lids.shape_key_add(name='Blink',from_mix=False)
 for v in lid_close.data:v.co.y-=.042
 
 for style in range(6):
@@ -623,9 +730,9 @@ for obj in list(bpy.context.scene.objects):
     elif obj.name in ['Details_Sclera','Details_Iris','Details_Pupil']:shapes=['Blink']
     elif obj.name=='Details_Shoe':shapes=['Blink'] # includes the tiny eye glints
     if not shapes:continue
-    obj.shape_key_add(name='Basis')
+    obj.shape_key_add(name='Basis',from_mix=False)
     for name in shapes:
-        key=obj.shape_key_add(name=name)
+        key=obj.shape_key_add(name=name,from_mix=False)
         for i,v in enumerate(obj.data.vertices):
             x,y,z=v.co
             if name=='BrowsRaised':key.data[i].co.z+=.010
@@ -739,6 +846,7 @@ bpy.ops.object.select_all(action='DESELECT')
 for o in bpy.context.scene.objects:o.select_set(True)
 # Working source is regenerated; only compact basketball runtime assets are distributed.
 bpy.ops.export_scene.gltf(filepath=str(OUT/'Athlete.glb'),export_format='GLB',export_apply=False,export_animations=False,export_skins=True,export_morph=True)
+print('Crotch height',round(CROTCH,3))
 print('Athlete exported:',len(body.data.vertices),'visible skin vertices;',len(positions),'deform bones')
 if '--preview' in sys.argv:
     # CPU proof render is available without claiming the team's display server.

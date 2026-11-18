@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { buildGear } from './gear.js';
+import { PRINT } from './kitprint.js';
 
 const PARENT = {
   hips: null, spine: 'hips', chest: 'spine', neck: 'chest', head: 'neck',
@@ -243,13 +244,16 @@ function hullFor(geo) {
 
 // Shared kit shader: the `kit` vertex attribute (slot, baked AO) picks a
 // per-figure uniform colour. Physically based skin, cloth and eyes retain:
-// baked ambient occlusion, a soft fresnel rim (cooler sheen on cloth, warm
-// scatter on skin), skin a touch warmer in shadow, and a back number whose
-// seven-segment digits are lit from a per-figure bit mask.
+// baked ambient occlusion, a soft fresnel rim (cooler on cloth, warm scatter on
+// skin), skin a touch warmer in shadow, and a uniform with panels, piping,
+// eyelet mesh, folds, sheen and twill lettering projected from a print atlas.
 // depth: the see-through body's depth pre-pass (setGhost), sharing `shared` (the figure's uniforms).
 const KIT_FRAGMENT_HEAD = `
 uniform vec4 uGear; uniform vec3 uGearColor; uniform vec3 uShoe; uniform float uFade; uniform sampler2D uFabric; uniform vec3 uArmE; uniform vec3 uArmW;
-uniform vec3 uKit1; uniform vec3 uKit2; uniform vec3 uSkin;
+uniform vec3 uKit1; uniform vec3 uKit2; uniform vec3 uKit3; uniform vec3 uPanel; uniform vec3 uSkin;
+#define KIT_PRINT_WIDTH ${PRINT.width.toFixed(4)}
+#define KIT_PRINT_HEIGHT ${PRINT.height.toFixed(4)}
+#define KIT_PRINT_BOTTOM ${PRINT.bottom.toFixed(4)}
 float kitHash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 43.21))) * 43758.5453); }
 // Smooth value noise in bind space: it sticks to the body as it moves.
 float kitNoise(vec3 p) {
@@ -260,7 +264,7 @@ float kitNoise(vec3 p) {
 // Detail painted in bind space, where every body region has a fixed address:
 // shoes and socks, hems and stripes, sleeves and bands, and living skin.
 const KIT_FRAGMENT_COLOR = `
-  float kitSlot = vKA.x, gearCloth = 0.0;
+  float kitSlot = vKA.x, gearCloth = 0.0, kitCloth = 0.0, kitTwill = 0.0, kitHeight = 0.0;
   bool kitSkin = (kitSlot > 4.5 && kitSlot < 5.5), kitHair = (kitSlot > 5.5 && kitSlot < 6.5);
   vec3 bp = vModelP; float arm = abs(bp.x);
   if (kitSlot < 0.5 && bp.y < 0.32 && bp.y > 0.0) {
@@ -276,14 +280,58 @@ const KIT_FRAGMENT_COLOR = `
       diffuseColor.rgb = mix(vec3(0.9, 0.9, 0.87), uKit1, stripe);
     }
   }
-  if (kitSlot > 3.5 && kitSlot < 4.5) {
-    // Shorts: darker waistband, a trim stripe down each side and round the hem.
-    float side = smoothstep(0.165, 0.175, arm) * (1.0 - smoothstep(0.03, 0.045, abs(bp.z - 0.015)));
-    float hem = step(bp.y, 0.835) + side;
-    diffuseColor.rgb = mix(diffuseColor.rgb, uKit2, clamp(hem, 0.0, 1.0) * 0.9);
-    diffuseColor.rgb *= mix(1.0, 0.72, smoothstep(1.045, 1.055, bp.y));
+  // ---- the uniform: panels and piping, twill lettering, mesh and folds
+  bool kitJersey = (kitSlot > 0.5 && kitSlot < 1.5), kitShorts = (kitSlot > 3.5 && kitSlot < 4.5);
+  bool kitBinding = (kitSlot > 1.5 && kitSlot < 2.5) || (kitSlot > 6.5 && kitSlot < 7.5);
+  // Around the body and up it, in metres: the grain of the cloth.
+  vec2 kitWrap = vec2(atan(bp.x, bp.z) * 0.16, bp.y);
+  float kitRib = 0.0;
+  if (kitJersey || kitShorts) {
+    kitCloth = 1.0;
+    // A side panel from armhole to hem and on down the leg, edged with piping.
+    float seam = abs(bp.z - 0.028), panelHalf = kitJersey ? mix(0.052, 0.036, smoothstep(0.95, 1.3, bp.y)) : 0.052;
+    float edge = fwidth(bp.z) + 0.0006, outside = smoothstep(0.125, 0.15, arm);
+    float panel = outside * (1.0 - smoothstep(panelHalf - edge, panelHalf + edge, seam));
+    float piping = outside * (1.0 - smoothstep(0.0032, 0.0032 + edge, abs(seam - panelHalf)));
+    diffuseColor.rgb = mix(diffuseColor.rgb, uPanel, panel);
+    diffuseColor.rgb = mix(diffuseColor.rgb, uKit2, piping);
+    float stitchFade = 1.0 - smoothstep(0.0012, 0.004, fwidth(bp.y)), hemY = kitJersey ? 0.915 : 0.592;
+    if (kitShorts) {
+      // Bound hem and an elastic, ribbed waistband.
+      float band = 1.0 - smoothstep(hemY + 0.02 - fwidth(bp.y), hemY + 0.02, bp.y);
+      diffuseColor.rgb = mix(diffuseColor.rgb, uKit2, band * 0.94);
+      float waist = smoothstep(1.043, 1.047, bp.y);
+      diffuseColor.rgb *= mix(1.0, 0.74, waist); kitRib = max(kitRib, waist);
+    }
+    // Twin-needle stitching above each hem.
+    float sewn = max(1.0 - smoothstep(0.0, 0.0011, abs(bp.y - hemY - (kitJersey ? 0.016 : 0.024))), 1.0 - smoothstep(0.0, 0.0011, abs(bp.y - hemY - (kitJersey ? 0.021 : 0.029))));
+    diffuseColor.rgb *= 1.0 - 0.22 * sewn * stitchFade; kitHeight -= 0.0005 * sewn * stitchFade;
+    if (kitJersey) {
+      // Tackle twill: wordmark and number on the chest, name and number on the back.
+      float front = step(0.06, bp.z), back = step(bp.z, 0.0);
+      vec2 puv = vec2(bp.x / KIT_PRINT_WIDTH, (bp.y - KIT_PRINT_BOTTOM) / KIT_PRINT_HEIGHT);
+      puv.x = front > 0.5 ? puv.x + 0.5 : 0.5 - puv.x;
+      vec2 twill = texture2D(uKitPrint, vec2((clamp(puv.x, 0.0, 1.0) + back) * 0.5, clamp(puv.y, 0.0, 1.0))).rg;
+      twill *= (front + back) * step(0.015, puv.x) * step(puv.x, 0.985) * step(0.0, puv.y) * step(puv.y, 1.0);
+      diffuseColor.rgb = mix(diffuseColor.rgb, uKit3 * 0.85, twill.g);
+      diffuseColor.rgb = mix(diffuseColor.rgb, uKit2, twill.r);
+      kitTwill = twill.g; kitHeight += 0.0011 * twill.g + 0.0004 * twill.r;
+    }
+    // Eyelet mesh: rows of pin holes, gone before they can shimmer.
+    vec2 eye = kitWrap * 430.0;
+    float eyeFade = (1.0 - smoothstep(0.16, 0.42, max(length(dFdx(eye)), length(dFdy(eye))))) * (1.0 - kitTwill) * (1.0 - panel);
+    vec2 cell = fract(vec2(eye.x + 0.5 * mod(floor(eye.y), 2.0), eye.y)) - 0.5;
+    float hole = (1.0 - smoothstep(0.13, 0.25, length(cell))) * eyeFade;
+    diffuseColor.rgb *= 1.0 - 0.3 * hole; kitHeight -= 0.0003 * hole;
+    // Folds: the cloth hangs in soft vertical drapes, deepest where it is loosest.
+    float loose = kitJersey ? mix(1.0, 0.3, smoothstep(1.06, 1.32, bp.y)) : 0.85;
+    float fold = kitNoise(vec3(bp.x * 15.0, bp.y * 5.5, bp.z * 15.0)) + 0.5 * kitNoise(vec3(bp.x * 33.0 + 3.1, bp.y * 13.0, bp.z * 33.0));
+    kitHeight += 0.0042 * loose * fold * (1.0 - 0.6 * kitTwill);
+    diffuseColor.rgb *= 1.0 - 0.1 * loose * (1.0 - smoothstep(0.35, 0.95, fold));
+    // Yarn-dyed cloth is never one flat colour.
+    diffuseColor.rgb *= 0.965 + 0.07 * kitNoise(bp * 380.0);
   }
-  if (kitSlot > 0.5 && kitSlot < 1.5) diffuseColor.rgb = mix(diffuseColor.rgb, uKit2, step(bp.y, 1.105) * 0.9);                   // jersey hem
+  if (kitBinding) { kitCloth = 1.0; kitRib = 1.0; }
   if (kitSkin) {
     // Skin is never one colour: broad mottling, fine grain, and a little more
     // blood in the knees, elbows, knuckles, ears and nose.
@@ -305,16 +353,21 @@ const KIT_FRAGMENT_COLOR = `
   // A fade: the hair thins into the skin over the ears and round the back.
   if (kitHair && uFade > 0.0) diffuseColor.rgb = mix(diffuseColor.rgb, uSkin * 0.82, uFade * (1.0 - smoothstep(1.665, 1.72, bp.y)));
   if (gearCloth > 0.5) diffuseColor.rgb = uGearColor * (0.92 + 0.08 * kitNoise(bp * 200.0));
+  if (gearCloth > 0.5 || (kitSlot > 2.5 && kitSlot < 3.5)) { kitCloth = 1.0; kitRib = 1.0; }
+  if (kitRib > 0.0) {
+    // Rib knit on bindings, waistband, sleeves and bands.
+    float ribs = kitWrap.x * 2600.0, ribFade = (1.0 - smoothstep(0.5, 1.4, fwidth(ribs))) * kitRib, rib = sin(ribs);
+    diffuseColor.rgb *= 1.0 + 0.07 * rib * ribFade; kitHeight += 0.00028 * rib * ribFade;
+  }
 `;
 const KIT_FRAGMENT_NORMAL = `
   #ifdef KIT_FABRIC
-  {
+  if (kitCloth > 0.5) {
     // Knit relief on every piece of cloth, wrapped round the body's long axis.
-    float cloth = max(gearCloth, step(0.5, vKA.x) * step(vKA.x, 4.5) + step(9.5, vKA.x));
-    vec2 fuv = vec2(atan(vModelP.x, vModelP.z) * 0.16, vModelP.y) * 52.0;
+    vec2 fuv = kitWrap * 52.0;
     vec2 st0 = dFdx(fuv), st1 = dFdy(fuv);
-    if (cloth > 0.5 && max(dot(st0, st0), dot(st1, st1)) < 0.4) {
-      vec3 knit = texture2D(uFabric, fuv).xyz * 2.0 - 1.0; knit.xy *= 0.7;
+    if (max(dot(st0, st0), dot(st1, st1)) < 0.4) {
+      vec3 knit = texture2D(uFabric, fuv).xyz * 2.0 - 1.0; knit.xy *= 0.7 * (1.0 - 0.7 * kitTwill);
       vec3 q0 = dFdx(-vViewPosition), q1 = dFdy(-vViewPosition), q1perp = cross(q1, normal), q0perp = cross(normal, q0);
       vec3 T = q1perp * st0.x + q0perp * st1.x, B = q1perp * st0.y + q0perp * st1.y;
       float det = max(dot(T, T), dot(B, B));
@@ -322,22 +375,28 @@ const KIT_FRAGMENT_NORMAL = `
     }
   }
   #endif
+  if (kitCloth > 0.5) {
+    // Folds, raised twill, stitching and eyelets: one height field in metres,
+    // turned into a normal from its screen-space slope.
+    vec3 sx = dFdx(-vViewPosition), sy = dFdy(-vViewPosition), r1 = cross(sy, normal), r2 = cross(normal, sx);
+    float det = dot(sx, r1);
+    normal = normalize(abs(det) * normal - sign(det) * (dFdx(kitHeight) * r1 + dFdy(kitHeight) * r2));
+  }
 `;
-const blankChestPrint = new THREE.DataTexture(new Uint8Array([0, 0, 0, 0]), 1, 1); blankChestPrint.needsUpdate = true;
+const blankPrint = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); blankPrint.needsUpdate = true;
 // A knit normal map shared by every kit (set once, before athletes are made).
 const flatNormal = new THREE.DataTexture(new Uint8Array([128, 128, 255, 255]), 1, 1); flatNormal.needsUpdate = true;
 const FABRIC = { texture: flatNormal, on: false };
 export function setFabric(texture) { if (texture) { FABRIC.texture = texture; FABRIC.on = true; } }
 function kitMaterial(shared = null, depth = false) {
-  const mat = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.78, metalness: 0, clearcoat: 0.035, clearcoatRoughness: 0.48, envMapIntensity: 0.45 });
+  const mat = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.78, metalness: 0, clearcoat: 0.035, clearcoatRoughness: 0.48, envMapIntensity: 0.45, sheen: 1, sheenColor: 0x000000, sheenRoughness: 0.45 });
   if (depth) mat.defines = { GHOST_DEPTH: 1 };
   if (FABRIC.on) mat.defines = { ...mat.defines, KIT_FABRIC: 1 };
   const uniforms = shared || {
     uKit1: { value: new THREE.Color(0x1f4fa8) }, uKit2: { value: new THREE.Color(0xf2c12e) }, uKit3: { value: new THREE.Color(0x14285a) },
     uKit4: { value: new THREE.Color(0x17336e) }, uSkin: { value: new THREE.Color(0xc68e62) }, uHair: { value: new THREE.Color(0x1d1510) },
     uPanel: { value: new THREE.Color(0x173f8c) },
-    uChestPrint: { value: blankChestPrint },
-    uNumber: { value: 0 },         // lit back-number segments (bit i = segment i)
+    uKitPrint: { value: blankPrint },   // twill lettering (kitprint.js)
     uNoHead: { value: 0 },         // 1: the head and neck are not drawn (your own see-through body)
     uHeadBones: { value: new THREE.Vector2(RIG.index.neck, RIG.index.head) },
     uLegBones: { value: new THREE.Vector2(Math.min(RIG.index.hipL, RIG.index.hipR), Math.max(RIG.index.ankleL, RIG.index.ankleR)) },
@@ -361,15 +420,14 @@ function kitMaterial(shared = null, depth = false) {
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', `#include <common>
         attribute vec2 kit;
-        uniform vec2 uHeadBones; uniform vec2 uLegBones; uniform vec2 uHandBones; uniform float uGloved; uniform int uNumber;
+        uniform vec2 uHeadBones; uniform vec2 uLegBones; uniform vec2 uHandBones; uniform float uGloved;
         uniform vec3 uKit1; uniform vec3 uKit2; uniform vec3 uKit3; uniform vec3 uKit4; uniform vec3 uSkin; uniform vec3 uHair; uniform vec3 uPanel;
         uniform vec3 uLegIdx; uniform vec3 uLegIdxR;
         varying float vHeadW; varying float vLegW; varying vec3 vSeg; varying float vHandW; varying vec2 vKA; varying vec3 vModelP;`)
       .replace('#include <color_vertex>', `#include <color_vertex>
         #ifdef USE_COLOR
           float k = kit.x;
-          if (k > 9.5) { int seg = int(k - 10.0 + 0.5); vColor.rgb = ((uNumber >> seg) & 1) == 1 ? uKit2 : uKit1; }
-          else if (k > 8.5) { /* Preserve authored iris, pupil and sclera colors. */ }
+          if (k > 8.5) { /* Preserve authored iris, pupil and sclera colors. */ }
           else if (k > 7.5) vColor.rgb = uSkin * vec3(0.86, 0.72, 0.70);
           else if (k > 6.5) vColor.rgb = uPanel; else if (k > 5.5) vColor.rgb = uHair; else if (k > 4.5) vColor.rgb = uSkin; else if (k > 3.5) vColor.rgb = uKit4;
           else if (k > 2.5) vColor.rgb = uKit3; else if (k > 1.5) vColor.rgb = uKit2; else if (k > 0.5) vColor.rgb = uKit1;
@@ -389,7 +447,7 @@ function kitMaterial(shared = null, depth = false) {
           }
         #endif`);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform float uNoHead;\nuniform float uTrunkAlpha;\nuniform vec4 uGhost;\nuniform float uGhostEdge;\nvarying float vHeadW;\nvarying float vLegW;\nvarying vec3 vSeg;\nvarying float vHandW;\nuniform float uGhostHands;\nuniform sampler2D uChestPrint;\nvarying vec2 vKA; varying vec3 vModelP;' + KIT_FRAGMENT_HEAD)
+      .replace('#include <common>', '#include <common>\nuniform float uNoHead;\nuniform float uTrunkAlpha;\nuniform vec4 uGhost;\nuniform float uGhostEdge;\nvarying float vHeadW;\nvarying float vLegW;\nvarying vec3 vSeg;\nvarying float vHandW;\nuniform float uGhostHands;\nuniform sampler2D uKitPrint;\nvarying vec2 vKA; varying vec3 vModelP;' + KIT_FRAGMENT_HEAD)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
         float skinSurface = step(4.5, vKA.x) * step(vKA.x, 5.5) + step(7.5, vKA.x) * step(vKA.x, 8.5);
         float pore = fract(sin(dot(floor(vModelP * 800.0), vec3(12.9898, 78.233, 43.21))) * 43758.5453);
@@ -398,15 +456,17 @@ function kitMaterial(shared = null, depth = false) {
         roughnessFactor = mix(0.88, 0.4 + pore * 0.1 + kitNoise(vModelP * 9.0) * 0.16, clamp(skinSurface, 0.0, 1.0));
         if (vKA.x < 0.5 && vModelP.y < 0.172) roughnessFactor = 0.55;
         float eyeSurface = step(8.5, vKA.x) * step(vKA.x, 9.5);
-        roughnessFactor = mix(roughnessFactor, 0.22, eyeSurface);`)
+        roughnessFactor = mix(roughnessFactor, 0.22, eyeSurface);
+        // Polyester knit: a soft, even surface; pressed twill is flatter and tighter.
+        if (kitCloth > 0.5) roughnessFactor = mix(0.7 + 0.12 * kitNoise(vModelP * 70.0), 0.5, kitTwill);`)
+      .replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
+        #ifdef USE_SHEEN
+          // The glow of knit cloth at grazing angles, in the colour of the cloth.
+          material.sheenColor = (diffuseColor.rgb * 0.5 + 0.12) * kitCloth * (1.0 - 0.6 * kitTwill); material.sheenRoughness = 0.45;
+        #endif`)
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>' + KIT_FRAGMENT_NORMAL)
       .replace('#include <color_fragment>', `#include <color_fragment>
   ${KIT_FRAGMENT_COLOR}
-  // Print onto the cloth so numbers follow its deformation without clipping.
-  vec2 chestUV = vec2(vModelP.x / 0.24 + 0.5, (vModelP.y - 1.12) / 0.26);
-  if (vKA.x > 0.5 && vKA.x < 1.5 && vModelP.z > 0.05 && chestUV.x >= 0.0 && chestUV.x <= 1.0 && chestUV.y >= 0.0 && chestUV.y <= 1.0) {
-    vec4 ink = texture2D(uChestPrint, chestUV); diffuseColor.rgb = mix(diffuseColor.rgb, ink.rgb, ink.a);
-  }
   diffuseColor.a *= mix(uTrunkAlpha, 1.0, clamp(vLegW, 0.0, 1.0));
   if (uGhost.w > 0.0) {
     vec3 sg = clamp(vSeg, 0.0, 1.0);
@@ -439,7 +499,7 @@ function kitMaterial(shared = null, depth = false) {
           }
         }`);
   };
-  mat.customProgramCacheKey = () => (depth ? 'rimrun-kit-pbr-v4-depth' : 'rimrun-kit-pbr-v4') + (FABRIC.on ? '-knit' : '');
+  mat.customProgramCacheKey = () => (depth ? 'rimrun-kit-pbr-v5-depth' : 'rimrun-kit-pbr-v5') + (FABRIC.on ? '-knit' : '');
   mat.userData.uniforms = uniforms;
   return mat;
 }
@@ -516,13 +576,9 @@ export class Humanoid {
     u.uGearColor.value.setHex(color); u.uShoe.value.setHex(shoe); u.uFade.value = fade;
   }
 
-  // Shirt number on the back (0 = none).
-  setNumber(n) {
-    const D = [0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f];   // abcdefg bits
-    n = Math.max(0, Math.min(99, n | 0));
-    this.number = n;
-    this.material.userData.uniforms.uNumber.value = n === 0 ? 0 : (n >= 10 ? D[Math.floor(n / 10)] : 0) | (D[n % 10] << 7);
-  }
+  // Shirt number (0 = none) and the lettering that carries it (kitprint.js).
+  setNumber(n) { this.number = Math.max(0, Math.min(99, n | 0)); }
+  setPrint(texture) { this.material.userData.uniforms.uKitPrint.value = texture || blankPrint; }
 
   setTeam(team) {
     const k = KITS[team] || KITS.home;

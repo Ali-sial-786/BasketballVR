@@ -4,7 +4,9 @@ import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import * as THREE from 'three';
 // The rig is real three.js skinning and IK; only its canvas shadow is stubbed.
-globalThis.document = { createElement: () => ({ getContext: () => ({ createRadialGradient: () => ({ addColorStop() {} }), fillRect() {}, fillText() {} }) }) };
+// A canvas that accepts any drawing call and draws nothing.
+const inertContext = new Proxy({ createRadialGradient: () => ({ addColorStop() {} }) }, { get: (target, key) => target[key] ?? (() => {}), set: () => true });
+globalThis.document = { createElement: () => ({ getContext: () => inertContext }) };
 globalThis.fetch = async url => {
   try { const buffer = await fs.readFile(fileURLToPath(new URL(`../public/${url}`, import.meta.url))); return { ok: true, json: async () => JSON.parse(buffer), arrayBuffer: async () => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) }; }
   catch { return { ok: false, status: 404 }; }

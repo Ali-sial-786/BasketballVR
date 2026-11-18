@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { CONFIG } from '../config.js';
 import { Humanoid, handGeometry } from './humanoid.js';
 import { applyClip, applyLocomotion, strideAt, MASK_LEGS, MASK_ARMS, MASK_TRUNK } from './clips.js';
-import { material, shadow, canvasTexture } from './util.js';
+import { material, shadow } from './util.js';
+import { kitPrintTexture } from './kitprint.js';
 import { Footwork } from './footwork.js';
 import { wrappedAngle, dribbleHand, dribbleTop, dribbleInHand, isTransfer } from '../game/movement.js';
 
@@ -30,13 +31,8 @@ export class PlayerView {
     this.h.setGear([{ wristbands: true, color: 0xf1ead6, shoe: 0xf2f2ee, fade: 0.55 }, { headband: true, leg: 'L', color: 0xf1ead6, shoe: 0x1b1d22 },
       { sleeve: 'R', color: 0x17191d, shoe: 0xf2f2ee, fade: 0.85 }, { headband: true, wristbands: true, color: 0x17191d, shoe: 0xc45d3e, fade: 0.3 }][player.id]);
     this.root = this.h.root; this.root.name = `athlete-${player.name}`;
-    const frontTexture = canvasTexture(256, 320, (c, w) => {
-      c.fillStyle = player.team === 0 ? '#e5ddb7' : '#ffe0b9'; c.textAlign = 'center';
-      c.font = '900 29px Arial'; c.fillText('R I M R U N', w / 2, 55);
-      c.font = '900 152px Arial'; c.fillText(['01', '07', '23', '11'][player.id], w / 2, 218);
-      c.font = '700 21px Arial'; c.fillText('A R E N A', w / 2, 264);
-    });
-    this.frontTexture = frontTexture; this.h.material.userData.uniforms.uChestPrint.value = frontTexture;
+    // Twill lettering: wordmark and number on the chest, name and number on the back.
+    this.print = kitPrintTexture({ name: player.name, number: this.h.number }); this.h.setPrint(this.print);
     this.h.bones.head.scale.set([1, 1.035, 0.97, 1.02][player.id], 1, 1);
     this.h.mesh.castShadow = true; this.h.mesh.receiveShadow = true; scene.add(this.root);
     this.shadow = shadow(scene, 0.55, 0.6);
@@ -299,7 +295,7 @@ export class PlayerView {
   dispose(scene) {
     scene.remove(this.root, this.shadow, this.marker);
     this.h.material.dispose(); this.h.mesh.skeleton.dispose(); this.shadow.material.dispose(); this.shadow.geometry.dispose(); this.marker.material.dispose(); this.marker.geometry.dispose();
-    this.frontTexture.dispose();
+    this.print.dispose();
     const index = Humanoid.all.indexOf(this.h); if (index >= 0) Humanoid.all.splice(index, 1);
   }
 }

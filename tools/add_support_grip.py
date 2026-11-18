@@ -11,7 +11,7 @@ def add_support_grip(body):
     keys = body.data.shape_keys.key_blocks
     basis = keys['Basis']
     right = keys['HandGrip']
-    left = keys.get('SupportGrip') or body.shape_key_add(name='SupportGrip')
+    left = keys.get('SupportGrip') or body.shape_key_add(name='SupportGrip',from_mix=False)
     tree = KDTree(len(basis.data))
     for i, point in enumerate(basis.data):
         tree.insert(point.co, i)

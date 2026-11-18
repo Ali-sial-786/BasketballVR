@@ -20,7 +20,7 @@
 // Per-vertex data: position f32x3, normal i8x3 + kit i8, colour u8x3 + AO u8,
 // joints u8x4, weights u8x4; indices u16.
 // Kit slots: 0 fixed colour, 1 shirt, 2 trim, 3 headgear, 4 trousers, 5 skin,
-// 6 hair, 7 shirt panel, 8 lips, 9 eyes, 10..23 back-number segments.
+// 6 hair, 7 shirt panel, 8 lips, 9 eyes.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -136,7 +136,7 @@ function armMove(p, w) {        // w: Float32Array(NS) weights
 
 // ------------------------------------------------------------------ parts
 // A part: { name, pos[], nrm[], w Float32Array(V*NS), kit[], col[], idx[] }
-const KIT = { fixed: 0, shirt: 1, trim: 2, headgear: 3, trousers: 4, skin: 5, hair: 6, panel: 7, lips: 8, eyes: 9, number: 10 };
+const KIT = { fixed: 0, shirt: 1, trim: 2, headgear: 3, trousers: 4, skin: 5, hair: 6, panel: 7, lips: 8, eyes: 9 };
 const matColor = (m) => gltf.materials[m].pbrMetallicRoughness.baseColorFactor.slice(0, 3).map((c) => Math.pow(c, 1 / 2.2));
 const MORPH = { HandGrip: RELAX, SupportGrip: RELAX };
 
@@ -375,27 +375,10 @@ function paint(part, regions) {
   }
   Object.assign(part, { pos: out.pos, nrm: out.nrm, w: out.w, kit: out.kit, col: out.col, idx: out.idx });
 }
-// Shirt: shoulder yoke (panel), sleeve cuffs (trim), side piping (trim), and a
-// two-digit seven-segment number on the back (segments 0..6 = left digit as
-// read, 7..13 = right; lit ones are drawn in trim, the rest in shirt colour).
-{
-  const R = [];
-  const H = 0.135, Wd = 0.074, T = 0.0095, gap = 0.026, cy = 1.262, slant = 0.07;
-  const segs = [[0.14, 1, 0.86, 1], [1, 0.93, 1, 0.57], [1, 0.43, 1, 0.07], [0.14, 0, 0.86, 0], [0, 0.43, 0, 0.07], [0, 0.93, 0, 0.57], [0.14, 0.5, 0.86, 0.5]];
-  for (let dgt = 0; dgt < 2; dgt++) {
-    const x0 = (dgt === 0 ? 1 : -1) * (gap / 2 + Wd / 2);          // seen from behind, +x is the viewer's left
-    segs.forEach((sg, k) => {
-      const P = (sxx, syy) => [x0 + (0.5 - sxx) * Wd - (syy - 0.5) * slant * H, cy - H / 2 + syy * H];
-      const A = P(sg[0], sg[1]), B = P(sg[2], sg[3]);
-      const d = norm([B[0] - A[0], B[1] - A[1], 0]), nn = [-d[1], d[0]];
-      const along = (v) => (v.p[0] - A[0]) * d[0] + (v.p[1] - A[1]) * d[1], L = Math.hypot(B[0] - A[0], B[1] - A[1]);
-      const across = (v) => (v.p[0] - A[0]) * nn[0] + (v.p[1] - A[1]) * nn[1];
-      R.push({ kit: KIT.number + dgt * 7 + k, f: [(v) => -v.p[2], (v) => -v.n[2], (v) => along(v) + T * 0.6, (v) => L + T * 0.6 - along(v), (v) => T - across(v), (v) => across(v) + T] });
-    });
-  }
-  R.unshift({kit:KIT.trim,f:[v=>0.014-neckline(v.p)]},{kit:KIT.trim,f:[v=>0.014-armhole(v.p)]});
-  paint(polo, R);
-}
+// Shirt: bound neckline and armholes (trim). The wordmark, name and numbers
+// are printed onto the cloth at run time (src/render/kitprint.js), so the back
+// of the jersey stays one unbroken, evenly tessellated panel.
+paint(polo, [{ kit: KIT.trim, f: [v => 0.014 - neckline(v.p)] }, { kit: KIT.trim, f: [v => 0.014 - armhole(v.p)] }]);
 // Trousers: a stripe down the outside of each leg, waist to hem.
 {
   const R = [];
