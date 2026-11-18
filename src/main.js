@@ -7,8 +7,10 @@ import { Vec3 } from './physics/math.js';
 import { Input } from './input/input.js';
 import { Arena } from './render/arena.js';
 import { PlayerView, HandsView } from './render/athletes.js';
-import { loadAthlete } from './render/humanoid.js';
+import { loadAthlete, setFabric } from './render/humanoid.js';
 import { loadClips } from './render/clips.js';
+import { loadCrowd } from './render/crowd.js';
+import { Pipeline, loadLook } from './render/pipeline.js';
 import { Effects } from './render/effects.js';
 import { Audio } from './audio.js';
 import { UI } from './ui.js';
@@ -24,7 +26,9 @@ function fail(error) {
 }
 
 async function init() {
-  await Promise.all([loadAthlete(`${import.meta.env.BASE_URL}assets/models/`), loadClips(`${import.meta.env.BASE_URL}assets/anim/`)]);
+  await Promise.all([loadAthlete(`${import.meta.env.BASE_URL}assets/models/`), loadClips(`${import.meta.env.BASE_URL}assets/anim/`), loadCrowd(`${import.meta.env.BASE_URL}assets/models/`)]);
+  const look = await loadLook(`${import.meta.env.BASE_URL}assets/textures/`);
+  setFabric(look.jerseyNormal);
   const settings = loadSettings(), audio = new Audio(); audio.enabled = settings.sound;
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75)); renderer.setSize(innerWidth, innerHeight);
@@ -35,7 +39,16 @@ async function init() {
   document.getElementById('app').appendChild(renderer.domElement);
   const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.035, 350);
   const rig = new THREE.Group(); scene.add(rig); rig.add(camera);
-  const engine = new GameEngine(), court = new Arena(scene, renderer), effects = new Effects(scene);
+  const engine = new GameEngine(), court = new Arena(scene, renderer, look), effects = new Effects(scene);
+  // Desktop GPUs get the mirrored floor, HDR and bloom; touch devices and the
+  // headset keep a single forward pass.
+  const pipeline = new Pipeline(renderer, scene, camera);
+  const richGraphics = () => settings.graphics === 'high' || settings.graphics === 'auto' && !matchMedia('(pointer: coarse)').matches;
+  pipeline.attachFloor(court.floorMesh, court.floorUniforms); pipeline.attachFeed(court); pipeline.setQuality(richGraphics());
+  const feedFocus = new THREE.Vector3();
+  // On Auto, a machine that cannot hold about 40 frames a second with the
+  // rich pipeline is moved to the standard one, once, and told.
+  const pace = { last: performance.now(), slow: 0, frames: 0, settled: false };
   const input = new Input(renderer, rig, camera, renderer.domElement), hands = new HandsView(scene, court.environment);
   let players = [], menu = true, demo = false, demoRestart = 0, accumulator = 0, lastTime = null, uiTick = 0, pending = {}, blink = 0, xrBlink = 0, nextFrame = false;
   const demoFocus = new THREE.Vector3(0, 1.2, -2.2), demoPosition = new THREE.Vector3();
@@ -118,20 +131,20 @@ async function init() {
 
   const ui = new UI(engine, settings, {
     play: start, demo: startDemo, takeControl, pause, resume, home, xr: () => { audio.init(); xr.start(); }, unlock: () => input.unlock(),
-    uiSound: () => { audio.init(); audio.play({ type: 'ui' }); }, settingsChanged: () => audio.setEnabled(settings.sound),
+    uiSound: () => { audio.init(); audio.play({ type: 'ui' }); }, settingsChanged: () => { audio.setEnabled(settings.sound); pipeline.setQuality(richGraphics()); },
   });
   const xrUI = new XRUI(scene, input, engine, settings, { play: start, resume, select: mode => ui.selectMode(mode), settings: () => ui.syncSettings(), exit: () => xr.end() });
   const xr = new XRSessionManager(renderer, {
     onStart: () => {
       engine.preview = menu || demo || engine.preview; demo = false; ui.setDemo(false);
-      document.body.classList.add('in-xr'); renderer.shadowMap.enabled = false;
+      document.body.classList.add('in-xr'); renderer.shadowMap.enabled = false; court.setDetail(false);
       input.unlock(); input.enabled = false; input.clear(); engine.pause(); menu = false;
       // The first XR pose, not the old cinematic camera, places the menu.
       rig.position.set(0, 0, 2); rig.rotation.set(0, 0, 0); camera.position.set(0, 0, 0); camera.rotation.set(0, 0, 0);
       xrUI.open(ui.mode); accumulator = 0;
     },
     onEnd: () => {
-      document.body.classList.remove('in-xr'); renderer.shadowMap.enabled = true;
+      document.body.classList.remove('in-xr'); renderer.shadowMap.enabled = true; court.setDetail(true);
       input.clear(); input.enabled = false; engine.pause(); xrUI.close(); rig.rotation.set(0, 0, 0);
       if (engine.preview || menu) home(); else { ui.setPlaying(true); ui.pause(); }
       resize();
@@ -148,7 +161,7 @@ async function init() {
 
   function resize() {
     if (input.xr) return;
-    camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight);
+    camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); pipeline.resize();
   }
   window.addEventListener('resize', resize);
   // Context loss pauses simulation so a ball cannot score while the display is gone.
@@ -187,7 +200,7 @@ async function init() {
       chaseLook.set(p.pos.x + sin * 3.4, 1.72 + p.jump * 0.5 + input.pitch * 3, p.pos.z + cos * 3.4);
       // Sit just off the ball-hand shoulder so the lane ahead stays open.
       const shoulder = 0.42 * p.side;
-      viewerPosition.set(THREE.MathUtils.clamp(p.pos.x - sin * back - cos * shoulder, -9.3, 9.3), 2.02 + p.jump * 0.4 - input.pitch * 1.1, THREE.MathUtils.clamp(p.pos.z - cos * back + sin * shoulder, -9.2, 21));
+      viewerPosition.set(THREE.MathUtils.clamp(p.pos.x - sin * back - cos * shoulder, -8.5, 8.5), 2.02 + p.jump * 0.4 - input.pitch * 1.1, THREE.MathUtils.clamp(p.pos.z - cos * back + sin * shoulder, -8.9, 20.9));
       if (!chaseReady) { chase.copy(viewerPosition); chaseReady = true; } else chase.lerp(viewerPosition, 1 - Math.exp(-dt * 14));
       camera.position.copy(chase); camera.lookAt(chaseLook);
     } else {
@@ -202,7 +215,7 @@ async function init() {
   // Integration harness exposed only with an explicit test query parameter.
   // Smoke tests drive normal input and use this snapshot to assert outcomes.
   if (new URLSearchParams(location.search).has('test')) {
-    window.__rimrun = { engine, input, settings, start, startDemo, takeControl, pause, resume, home, scene, renderer, views: () => players,
+    window.__rimrun = { engine, input, settings, pipeline, court, camera, render: () => pipeline.render(false), start, startDemo, takeControl, pause, resume, home, scene, renderer, views: () => players,
       snapshot: () => ({ phase: engine.phase, mode: engine.mode, score: [...engine.score], owner: engine.ownerId, ball: engine.ball.pos.toArray(), stats: { ...engine.stats }, rack: engine.rack, shots: engine.contestShots }) };
   }
   home(); document.body.classList.add('ready');
@@ -279,7 +292,17 @@ async function init() {
       uiTick += dt; if (uiTick > 0.05) { uiTick = 0; if (!menu) ui.update(now); }
       blink = Math.max(0, blink - wallDt); blinkElement.style.opacity = String(Math.min(0.85, blink * 6));
       xrBlink = Math.max(0, xrBlink - wallDt); comfort.visible = input.xr && xrBlink > 0; comfort.position.copy(input.head.p); comfortMat.opacity = Math.min(0.92, xrBlink * 7);
-      renderer.render(scene, camera);
+      if (!pace.settled && settings.graphics === 'auto' && pipeline.high && !input.xr && document.hasFocus()) {
+        const t = performance.now(), frame = t - pace.last; pace.last = t;
+        if (frame < 250) { pace.frames++; if (frame > 25) pace.slow++; }
+        if (pace.frames >= 180) {
+          if (pace.slow > 110) { pipeline.setQuality(false); if (!menu) engine.toast('STANDARD GRAPHICS.', 'Reflections and bloom are off. Change it in Settings.'); pace.settled = true; }
+          else if (pace.slow < 40) pace.settled = true;
+          pace.frames = pace.slow = 0;
+        }
+      } else pace.last = performance.now();
+      pipeline.feed(feedFocus.set(engine.ball.pos.x, Math.max(1.2, engine.ball.pos.y * 0.6 + 0.6), engine.ball.pos.z));
+      pipeline.render(input.xr);
     } catch (error) { if (!errorShown) { errorShown = true; fail(error); renderer.setAnimationLoop(null); } }
   });
 }

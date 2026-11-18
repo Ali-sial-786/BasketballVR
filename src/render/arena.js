@@ -2,24 +2,29 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CONFIG, RACKS } from '../config.js';
-import { Humanoid } from './humanoid.js';
-import { applyClip } from './clips.js';
+import { Crowd } from './crowd.js';
+import { NO_MIRROR } from './pipeline.js';
+import { ribbons, courtside, suites, rigging, stanchion } from './arena-detail.js';
 import { material, mesh, box, cylinderBetween, canvasTexture, label, makeBall } from './util.js';
 
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
 const palette = { steel: material(0x202e3c, { metalness: 0.58, roughness: 0.42 }), concrete: material(0x14202c), cream: material(0xdedecf), coral: material(0xc66b45), teal: material(0x183c46) };
 
 export class Arena {
-  constructor(scene, renderer) {
-    Object.assign(this, { scene, renderer, flash: 0, netTime: 9, netKick: 0, cheer: 0, cheerGoal: 0, rimFlex: 0, rackBalls: [], spectators: [] });
+  constructor(scene, renderer, look = {}) {
+    Object.assign(this, { scene, renderer, look, flash: 0, netTime: 9, netKick: 0, cheer: 0, cheerGoal: 0, rimFlex: 0, rackBalls: [], spectators: [] });
     this.crowdUniforms = { uCheer: { value: 0 }, uCrowdTime: { value: 0 } };
+    this.palette = palette; this.noMirror = NO_MIRROR; this.ribbonTextures = [];
     scene.background = new THREE.Color(0x0d1622); scene.fog = new THREE.FogExp2(0x101b2b, 0.006);
-    const pmrem = new THREE.PMREMGenerator(renderer), room = new RoomEnvironment();
-    this.environmentTarget = pmrem.fromScene(room, 0.04); this.environment = this.environmentTarget.texture;
-    // Use reflections on athletes and hardwood; matte walls and the distant
-    // crowd do not need the room's environment lookup on every pixel.
-    room.dispose(); pmrem.dispose();
-    scene.add(new THREE.HemisphereLight(0xd3e4f7, 0x4a3f2f, 1.45));
+    // Image-based light from a real hall: a dark ceiling carrying banks of
+    // spotlights over a wood floor. It is what the varnish, the ball and skin
+    // reflect. Without the file, a procedural room stands in.
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    if (look.hdr) this.environmentTarget = pmrem.fromEquirectangular(look.hdr);
+    else { const room = new RoomEnvironment(); this.environmentTarget = pmrem.fromScene(room, 0.04); room.dispose(); }
+    this.environment = this.environmentTarget.texture; pmrem.dispose();
+    scene.environment = this.environment; scene.environmentIntensity = look.hdr ? 0.55 : 0.3;
+    scene.add(new THREE.HemisphereLight(0xd3e4f7, 0x4a3f2f, look.hdr ? 0.95 : 1.45));
     const key = new THREE.DirectionalLight(0xffefdc, 3.2); key.position.set(-4, 14, 3); key.target.position.set(0, 0, 1);
     key.castShadow = true; key.shadow.mapSize.set(2048, 2048); Object.assign(key.shadow.camera, { left: -14, right: 14, top: 15, bottom: -15, near: 0.5, far: 38 });
     key.shadow.normalBias = 0.022; key.shadow.bias = -0.0001; scene.add(key, key.target); this.key = key;
@@ -27,7 +32,7 @@ export class Arena {
     // The broad overhead key, fill and room environment cover the hardwood.
     // Individual fixture meshes supply the visual lights without four extra
     // per-pixel spot-light evaluations across the full court and crowd.
-    this.floor(); this.hoop(); this.bowl(); this.roof(); this.jumbotron(); this.farBasket(); this.racks();
+    this.floor(); ribbons(this); this.hoop(); this.bowl(); this.roof(); suites(this); rigging(this); this.jumbotron(); this.farBasket(); this.racks();
     this.drawScore({ score: [0, 0], mode: 'preview', shotClock: 18, contestTime: 70 }); this.batchStatic();
   }
   floor() {
@@ -43,7 +48,7 @@ export class Arena {
         let start = -random() * 270;
         while (start < h) {
           const span = 150 + random() * 170, left = column * plankWidth;
-          const lum = 55 + random() * 9; c.fillStyle = `hsl(${33 + random() * 5} 49% ${lum}%)`; c.fillRect(left, start, plankWidth, span);
+          const lum = this.look.woodColor ? 57 + random() * 4 : 55 + random() * 9; c.fillStyle = `hsl(${33 + random() * 5} 49% ${lum}%)`; c.fillRect(left, start, plankWidth, span);
           c.strokeStyle = '#5b3d2329'; c.lineWidth = 0.7; c.strokeRect(left, start, plankWidth, span);
           for (let k = 0; k < 4; k++) { c.strokeStyle = k % 2 ? '#f9df9c35' : '#6a3f2020'; c.beginPath(); const gx = left + random() * plankWidth; c.moveTo(gx, start); c.bezierCurveTo(gx + 2, start + span * 0.3, gx - 2, start + span * 0.65, gx, start + span); c.stroke(); }
           start += span;
@@ -79,8 +84,50 @@ export class Arena {
     texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
     const bump = canvasTexture(128, 512, (c, w, h) => { c.fillStyle = '#888'; c.fillRect(0, 0, w, h); for (let i = 0; i < 160; i++) { c.strokeStyle = i % 2 ? '#999' : '#777'; c.beginPath(); const x = random() * w; c.moveTo(x, 0); c.lineTo(x + (random() - 0.5) * 3, h); c.stroke(); } });
     bump.colorSpace = THREE.NoColorSpace; bump.wrapS = bump.wrapT = THREE.RepeatWrapping; bump.repeat.set(40, 18);
-    const finish = new THREE.MeshStandardMaterial({ color: 0xffffff, map: texture, bumpMap: bump, bumpScale: 0.0015, roughness: 0.34, metalness: 0.03, envMap: this.environment, envMapIntensity: 0.38 });
-    const floor = mesh(new THREE.PlaneGeometry(width, length), finish, scene, [0, 0.013, 6]); floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true;
+    // Varnished maple: grain, plank relief and gloss variation from a CC0
+    // scanned wood floor, under a clear coat that picks up the lights.
+    const look = this.look, wood = !!(look.woodNormal && look.woodRough);
+    const finish = new THREE.MeshPhysicalMaterial({ color: 0xffffff, map: texture, roughness: wood ? 0.62 : 0.34, metalness: 0, envMap: this.environment, envMapIntensity: 0.5,
+      clearcoat: 0.55, clearcoatRoughness: 0.16 });
+    if (wood) { finish.normalMap = look.woodNormal; finish.normalScale.set(0.35, 0.35); finish.roughnessMap = look.woodRough; }
+    else { finish.bumpMap = bump; finish.bumpScale = 0.0015; }
+    // The floor also mirrors the live scene (players, ball, boards) when the
+    // render pipeline provides a reflection; uMirror is 0 otherwise.
+    this.floorUniforms = { tMirror: { value: null }, uMirrorMatrix: { value: new THREE.Matrix4() }, uMirror: { value: 0 }, tWood: { value: look.woodColor || null } };
+    if (look.woodColor) finish.defines.FLOOR_GRAIN = 1;
+    finish.onBeforeCompile = shader => {
+      Object.assign(shader.uniforms, this.floorUniforms);
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nuniform mat4 uMirrorMatrix;\nvarying vec4 vMirror;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vMirror = uMirrorMatrix * vec4(position, 1.0);');
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform sampler2D tMirror;\nuniform sampler2D tWood;\nuniform float uMirror;\nvarying vec4 vMirror;')
+        .replace('#include <map_fragment>', `#include <map_fragment>
+          #ifdef FLOOR_GRAIN
+          {
+            // Plank-to-plank tone and fine grain, relative to the local average
+            // so the painted areas keep their colour.
+            vec2 plank = vMapUv * vec2(18.0, 30.0);
+            float fine = dot(texture2D(tWood, plank).rgb, vec3(0.333)), broad = dot(texture2D(tWood, plank, 5.0).rgb, vec3(0.333));
+            diffuseColor.rgb *= clamp(fine / max(broad, 0.02), 0.84, 1.14);
+          }
+          #endif`)
+        .replace('#include <opaque_fragment>', `
+          if (uMirror > 0.0) {
+            // A varnished floor mirrors at grazing angles and barely at all
+            // straight down; the planks ripple the image.
+            vec2 at = vMirror.xy / max(vMirror.w, 0.0001) + normal.xy * 0.012;
+            float spread = 0.0016 + roughnessFactor * 0.003;
+            vec3 image = texture2D(tMirror, at).rgb * 0.4 + (texture2D(tMirror, at + vec2(spread, 0.0)).rgb + texture2D(tMirror, at - vec2(spread, 0.0)).rgb
+              + texture2D(tMirror, at + vec2(0.0, spread * 1.6)).rgb + texture2D(tMirror, at - vec2(0.0, spread * 1.6)).rgb) * 0.15;
+            float grazing = pow(1.0 - saturate(dot(normalize(vViewPosition), normal)), 3.0);
+            outgoingLight += image * (0.07 + 0.75 * grazing) * uMirror * (1.2 - roughnessFactor);
+          }
+          #include <opaque_fragment>`);
+    };
+    finish.customProgramCacheKey = () => `rimrun-floor-${look.woodColor ? 'grain' : 'plain'}`;
+    const floor = mesh(new THREE.PlaneGeometry(width, length), finish, scene, [0, 0.013, 6]); floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; floor.name = 'hardwood';
+    this.floorMesh = floor;
     for (const x of [-9.55, 9.55]) box(scene, [0.08, 0.05, 32], [x, 0.015, 6], palette.steel);
   }
   bowl() {
@@ -94,80 +141,26 @@ export class Arena {
       const y = row * 0.48, d = 11.1 + row * 0.82;
       for (const side of [-1, 1]) {
         box(scene, [0.84, 0.5, 36], [side * d, y, 6], riser);
-        for (let i = 0; i < 49; i++) { const z = -11 + i * 0.7; if (i % 16 < 2) continue; locations.push({ x: side * d, y: y + 0.25, z, yaw: -side * Math.PI / 2 }); }
+        for (let i = 0; i < 49; i++) { const z = -11 + i * 0.7; if (i % 16 < 2) continue; locations.push({ x: side * d, y: y + 0.25, z, yaw: -side * Math.PI / 2, row }); }
       }
       for (const end of [-1, 1]) {
         const z = 6 + end * (18 + row * 0.82);
         box(scene, [22, 0.5, 0.84], [0, y, z], riser);
-        for (let i = 0; i < 31; i++) { if (i % 12 < 2) continue; locations.push({ x: -10.5 + i * 0.7, y: y + 0.25, z, yaw: end > 0 ? Math.PI : 0 }); }
+        for (let i = 0; i < 31; i++) { if (i % 12 < 2) continue; locations.push({ x: -10.5 + i * 0.7, y: y + 0.25, z, yaw: end > 0 ? Math.PI : 0, row }); }
       }
     }
     const seats = new THREE.InstancedMesh(seatGeometry, material(0xffffff), locations.length), matrix = new THREE.Matrix4(), q = new THREE.Quaternion(), color = new THREE.Color();
     let seed = 817; const random = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-    const occupied = locations.filter(() => random() > 0.27);
-    // One shared pair of uniforms lifts the whole crowd out of its seats: each
-    // person bounces on their own beat, keyed from where they sit.
-    const crowdMaterial = () => {
-      const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
-      m.onBeforeCompile = shader => {
-        Object.assign(shader.uniforms, this.crowdUniforms);
-        shader.vertexShader = 'uniform float uCheer;\nuniform float uCrowdTime;\n' + shader.vertexShader.replace('#include <project_vertex>', `
-          vec4 mvPosition = vec4( transformed, 1.0 );
-          #ifdef USE_INSTANCING
-            mvPosition = instanceMatrix * mvPosition;
-            float seat = instanceMatrix[3].x * 3.71 + instanceMatrix[3].z * 2.37;
-            float keen = 0.35 + 0.65 * fract(sin(seat * 12.9898) * 43758.5453);
-            mvPosition.y += uCheer * keen * (0.1 + 0.2 * abs(sin(uCrowdTime * (6.0 + keen * 3.0) + seat)));
-          #endif
-          mvPosition = modelViewMatrix * mvPosition;
-          gl_Position = projectionMatrix * mvPosition;`);
-      };
-      return m;
-    };
-    const headParts = [new THREE.SphereGeometry(1, 6, 4)];
-    const nose = new THREE.SphereGeometry(0.22, 4, 2); nose.scale(0.7, 0.85, 1.2); nose.translate(0, -0.03, 0.94); headParts.push(nose);
-    for (const side of [-1, 1]) { const ear = new THREE.SphereGeometry(0.17, 4, 2); ear.scale(0.5, 1.3, 0.75); ear.translate(side * 0.96, 0, 0); headParts.push(ear); }
-    const headGeo = mergeGeometries(headParts);
-    const shirtParts = [new THREE.CylinderGeometry(0.19, 0.16, 0.43, 6)];
-    for (const side of [-1, 1]) {
-      const sleeve = new THREE.CylinderGeometry(0.075, 0.07, 0.27, 4); sleeve.rotateZ(side * 0.22); sleeve.translate(side * 0.21, 0.015, 0.025); shirtParts.push(sleeve);
-      const thigh = new THREE.CylinderGeometry(0.092, 0.1, 0.34, 4); thigh.rotateX(Math.PI / 2); thigh.translate(side * 0.105, -0.19, 0.2); shirtParts.push(thigh);
-    }
-    const bodyGeo = mergeGeometries(shirtParts), limbParts = [];
-    for (const side of [-1, 1]) {
-      const arm = new THREE.CylinderGeometry(0.05, 0.038, 0.27, 4); arm.rotateX(-1.05); arm.translate(side * 0.23, -0.17, 0.14); limbParts.push(arm);
-      const hand = new THREE.SphereGeometry(0.048, 4, 3); hand.scale(0.8, 0.65, 1.25); hand.translate(side * 0.23, -0.23, 0.26); limbParts.push(hand);
-      const leg = new THREE.CylinderGeometry(0.064, 0.045, 0.36, 4); leg.translate(side * 0.105, -0.4, 0.33); limbParts.push(leg);
-    }
-    const limbs = new THREE.InstancedMesh(mergeGeometries(limbParts), crowdMaterial(), occupied.length);
-    const hair = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 6, 3, 0, Math.PI * 2, 0, Math.PI * 0.49), crowdMaterial(), occupied.length);
-    const heads = new THREE.InstancedMesh(headGeo, crowdMaterial(), occupied.length);
-    const bodies = new THREE.InstancedMesh(bodyGeo, crowdMaterial(), occupied.length);
+    const occupied = locations.filter(() => random() > 0.2);
     locations.forEach((p, i) => { q.setFromAxisAngle(V(0, 1, 0), p.yaw); matrix.compose(V(p.x, p.y, p.z), q, V(1, 1, 1)); seats.setMatrixAt(i, matrix); seats.setColorAt(i, color.setHex(i % 13 === 0 ? 0x735344 : i % 3 ? 0x243d50 : 0x1b2f40)); });
-    occupied.forEach((p, i) => {
-      q.setFromAxisAngle(V(0, 1, 0), p.yaw);
-      const skin = [0xa57455, 0x5a3a2c, 0xd3aa82, 0x825239][i % 4];
-      matrix.compose(V(p.x, p.y + 1.12, p.z), q, V(0.105, 0.138, 0.11)); heads.setMatrixAt(i, matrix); heads.setColorAt(i, color.setHex(skin).multiplyScalar(0.74));
-      matrix.compose(V(p.x, p.y + 1.13, p.z), q, V(0.109, 0.14, 0.115)); hair.setMatrixAt(i, matrix); hair.setColorAt(i, color.setHex([0x171513, 0x352820, 0x5b4932, 0x171513, 0x78716a][i % 5]).multiplyScalar(0.8));
-      matrix.compose(V(p.x, p.y + 0.76, p.z), q, V(1, 1, 0.85)); bodies.setMatrixAt(i, matrix); bodies.setColorAt(i, color.setHex([0x2c5c68, 0x9d7657, 0x8a989b, 0x343c50, 0x9c563d, 0xc5c0a9, 0x1f8a7a, 0xd9825a][i % 8]).multiplyScalar(0.74));
-      limbs.setMatrixAt(i, matrix); limbs.setColorAt(i, color.setHex(skin).multiplyScalar(0.74));
-    });
-    scene.add(seats, heads, bodies, limbs, hair);
+    scene.add(seats);
+    // Real spectators: the athlete model, seated, re-dressed and instanced.
+    // Courtside chairs, benches and the scorer's table join the bowl.
+    this.crowd = new Crowd(scene, [...occupied, ...courtside(this)], this.crowdUniforms);
+    seats.layers.set(NO_MIRROR);
     for (const side of [-1, 1]) {
       for (const z of [-11.5, 23.5]) cylinderBetween(scene, V(side * 10.5, 0.5, z), V(side * 21, 6.2, z), 0.045, rail);
       box(scene, [0.07, 0.7, 36], [side * 10.35, 0.8, 6], rail);
-      const ribbon = label(scene, 'RIMRUN   /   THE FIELDHOUSE   /   OWN THE COURT', 30, 0.68, [side * 10.25, 1.35, 6], { background: '#0d313e', color: '#ddb78e', font: '900 53px Arial', rotation: -side * Math.PI / 2 });
-      ribbon.material.toneMapped = false;
-      for (const z of [-4, 5, 14]) {
-        box(scene, [0.65, 0.12, 2.7], [side * 9.65, 0.5, z], palette.steel);
-        for (const offset of [-1, 1]) cylinderBetween(scene, V(side * 9.65, 0, z + offset), V(side * 9.65, 0.48, z + offset), 0.025, rail);
-      }
-    }
-    for (let i = 0; i < 6; i++) {
-      const h = new Humanoid({ team: i % 2 ? 'home' : 'away', headgear: 'bare', seed: i * 11, scale: 1.01 + i % 3 * 0.02 }); h.setLod(1); h.setNumber(0);
-      h.material.envMap = this.environment; h.material.envMapIntensity = 0.38;
-      h.root.position.set(i % 2 ? -9.8 : 9.8, 0, -2 + Math.floor(i / 2) * 5); h.root.rotation.y = i % 2 ? Math.PI / 2 : -Math.PI / 2;
-      scene.add(h.root); applyClip(h, i % 2 ? 'idle' : 'idle_fold_arms', i * 0.4); h.update(); this.spectators.push(h);
     }
     // Hanging banners, drawn at their own proportions so the lettering is crisp.
     [[-18, 'FIELDHOUSE', 'EST. 2026', '#163b49'], [-6, 'RIMRUN', 'ALL HEART', '#1d4a55'], [6, 'RIMRUN', 'ALL HOOPS', '#7a4a36'], [18, 'CHAMPIONS', 'PICKUP LEAGUE', '#653f31']].forEach(([x, title, sub, background]) => {
@@ -186,35 +179,62 @@ export class Arena {
     });
   }
   roof() {
-    const scene = this.scene, roofMat = material(0x111c29), lightMat = new THREE.MeshBasicMaterial({ color: 0xc3dbed, toneMapped: false });
-    box(scene, [46, 0.3, 60], [0, 18.2, 6], roofMat);
+    const scene = this.scene, roofMat = material(0x0d151f), steel = material(0x1b2733, { metalness: 0.55, roughness: 0.45 });
+    // Panel lights are real sources to the eye: several times brighter than white.
+    const lightMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xd3e6f5).multiplyScalar(4.5), toneMapped: false });
+    const up = m => { m.userData.noMirror = true; return m; };
+    up(box(scene, [46, 0.3, 60], [0, 18.2, 6], roofMat));
     for (const z of [-19, -11, -3, 5, 13, 21, 29]) {
-      cylinderBetween(scene, V(-22, 15.6, z), V(22, 15.6, z), 0.075, palette.steel);
-      cylinderBetween(scene, V(-22, 17, z), V(22, 17, z), 0.075, palette.steel);
-      for (let i = 0; i < 14; i++) cylinderBetween(scene, V(-22 + i * 3.14, i % 2 ? 17 : 15.6, z), V(-22 + (i + 1) * 3.14, i % 2 ? 15.6 : 17, z), 0.045, palette.steel);
+      up(cylinderBetween(scene, V(-22, 15.6, z), V(22, 15.6, z), 0.075, steel));
+      up(cylinderBetween(scene, V(-22, 17, z), V(22, 17, z), 0.075, steel));
+      for (let i = 0; i < 14; i++) up(cylinderBetween(scene, V(-22 + i * 3.14, i % 2 ? 17 : 15.6, z), V(-22 + (i + 1) * 3.14, i % 2 ? 15.6 : 17, z), 0.045, steel));
       for (const x of [-16, -6, 6, 16]) {
-        box(scene, [1.9, 0.25, 0.85], [x, 15.4, z], palette.steel);
+        up(box(scene, [1.9, 0.25, 0.85], [x, 15.4, z], steel));
         box(scene, [1.7, 0.025, 0.68], [x, 15.25, z], lightMat);
       }
     }
-    for (const x of [-21, -10.5, 0, 10.5, 21]) cylinderBetween(scene, V(x, 17.5, -24), V(x, 17.5, 36), 0.08, palette.steel);
-  }
-  jumbotron() {
-    const { scene } = this;
-    box(scene, [4.6, 2.4, 4.6], [0, 11.7, 6], palette.steel);
-    const mat = new THREE.MeshBasicMaterial({ map: this.boardTexture, toneMapped: false });
-    for (const side of [-1, 1]) {
-      const a = mesh(new THREE.PlaneGeometry(4.4, 1.7), mat, scene, [0, 11.7, 6 + side * 2.31]); if (side < 0) a.rotation.y = Math.PI;
-      const b = mesh(new THREE.PlaneGeometry(4.4, 1.7), mat, scene, [side * 2.31, 11.7, 6]); b.rotation.y = side * Math.PI / 2;
-      cylinderBetween(scene, V(side * 1.5, 12.9, 4.5), V(side * 1.5, 18, 4.5), 0.045, palette.steel);
+    for (const x of [-21, -10.5, 0, 10.5, 21]) up(cylinderBetween(scene, V(x, 17.5, -24), V(x, 17.5, 36), 0.08, steel));
+    // A catwalk either side of the rig, with its own row of work lights.
+    for (const x of [-12.5, 12.5]) {
+      up(box(scene, [1.1, 0.06, 44], [x, 14.6, 6], steel));
+      for (const dx of [-0.55, 0.55]) up(box(scene, [0.03, 0.03, 44], [x + dx, 15.5, 6], steel));
+      for (let z = -15; z <= 27; z += 3) { up(cylinderBetween(scene, V(x - 0.55, 14.6, z), V(x - 0.55, 15.5, z), 0.015, steel, 4)); up(cylinderBetween(scene, V(x + 0.55, 14.6, z), V(x + 0.55, 15.5, z), 0.015, steel, 4)); }
     }
-    for (const y of [10.45, 12.95]) box(scene, [4.7, 0.08, 4.7], [0, y, 6], material(0xe6aa73, { emissive: 0xba703f, emissiveIntensity: 0.65 }));
+  }
+  // Centre-hung scoreboard: four video screens (the live broadcast feed when
+  // the pipeline provides one), a score panel under each, and LED trim.
+  jumbotron() {
+    const { scene } = this, y = 11.9, dark = material(0x0a0f15, { roughness: 0.55, metalness: 0.3 });
+    const up = m => { m.userData.noMirror = true; return m; };
+    up(box(scene, [6.0, 3.7, 6.0], [0, y, 6], dark)); up(box(scene, [4.9, 1.6, 4.9], [0, y - 2.7, 6], dark));
+    this.slate = canvasTexture(640, 360, (c, w, h) => {
+      const g = c.createLinearGradient(0, 0, w, h); g.addColorStop(0, '#123a44'); g.addColorStop(1, '#0a1c26'); c.fillStyle = g; c.fillRect(0, 0, w, h);
+      c.fillStyle = '#f3e3c0'; c.textAlign = 'center'; c.font = 'italic 900 150px Arial'; c.fillText('RIMRUN', w / 2, 200);
+      c.fillStyle = '#ffb47d'; c.font = '700 30px Arial'; c.fillText('T H E   F I E L D H O U S E', w / 2, 262);
+    });
+    this.screenMaterial = new THREE.MeshBasicMaterial({ map: this.slate, toneMapped: false });
+    const score = new THREE.MeshBasicMaterial({ map: this.boardTexture, toneMapped: false });
+    for (let i = 0; i < 4; i++) {
+      const a = i * Math.PI / 2, dx = Math.sin(a), dz = Math.cos(a);
+      const screen = mesh(new THREE.PlaneGeometry(5.6, 3.15), this.screenMaterial, scene, [dx * 3.02, y + 0.08, 6 + dz * 3.02]); screen.rotation.y = a; screen.layers.set(NO_MIRROR);
+      const panel = mesh(new THREE.PlaneGeometry(4.5, 1.4), score, scene, [dx * 2.47, y - 2.7, 6 + dz * 2.47]); panel.rotation.y = a; panel.layers.set(NO_MIRROR);
+      up(cylinderBetween(scene, V(dx * 2.2 + dz * 2.2, y + 1.85, 6 + dz * 2.2 - dx * 2.2), V(dx * 2.2 + dz * 2.2, 18, 6 + dz * 2.2 - dx * 2.2), 0.04, palette.steel, 5));
+    }
+    const trim = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffb47d).multiplyScalar(2.4), toneMapped: false });
+    // LED trim as open frames, so the underside stays dark from the floor.
+    for (const [ty, size] of [[y + 1.9, 6.16], [y - 1.83, 6.16], [y - 3.54, 5.06]]) for (const side of [-1, 1]) {
+      up(box(scene, [size, 0.09, 0.09], [0, ty, 6 + side * size / 2], trim)); up(box(scene, [0.09, 0.09, size], [side * size / 2, ty, 6], trim));
+    }
+  }
+  // In a headset: lighter spectators and no haze shafts.
+  setDetail(full) { this.crowd?.setDetail(full); for (const cone of this.haze || []) cone.visible = full; }
+  // The video screens show the broadcast feed, or the house slate without one.
+  setFeed(texture) {
+    this.screenMaterial.map = texture || this.slate; this.screenMaterial.color.setScalar(texture ? 0.9 : 1); this.screenMaterial.needsUpdate = true;
   }
   farBasket() {
     const s = this.scene;
-    box(s, [0.5, 1.7, 0.5], [0, 0.85, 20.8], palette.teal);
-    cylinderBetween(s, V(0, 0, 20.8), V(0, 3.7, 20.8), 0.1, palette.steel);
-    cylinderBetween(s, V(0, 3.7, 20.8), V(0, 3.5, 18.52), 0.075, palette.steel);
+    stanchion(this, 18.52, -1);
     box(s, [1.8, 1.05, 0.035], [0, 3.48, 18.52], new THREE.MeshPhysicalMaterial({ color: 0xb8d5df, transparent: true, opacity: 0.2, roughness: 0.1, depthWrite: false }));
     for (const x of [-0.91, 0.91]) box(s, [0.035, 1.1, 0.05], [x, 3.48, 18.52], palette.cream);
     for (const y of [2.955, 4.005]) box(s, [1.8, 0.035, 0.05], [0, y, 18.52], palette.cream);
@@ -223,10 +243,7 @@ export class Arena {
   }
   hoop() {
     const scene = this.scene, h = CONFIG.hoop, b = CONFIG.board;
-    box(scene, [0.85, 0.18, 1.1], [0, 0.04, -8.7], palette.steel);
-    cylinderBetween(scene, V(0, 0.15, -8.7), V(0, 3.8, -8.7), 0.11, palette.steel);
-    cylinderBetween(scene, V(0, 3.8, -8.7), V(0, 3.6, b.z), 0.08, palette.steel);
-    const pad = box(scene, [0.45, 1.7, 0.4], [0, 0.94, -8.7], palette.teal); pad.castShadow = true;
+    stanchion(this, b.z, 1);
     const glass = new THREE.MeshPhysicalMaterial({ color: 0xb6e3df, transparent: true, opacity: 0.26, roughness: 0.1, side: THREE.DoubleSide, depthWrite: false });
     box(scene, [b.width, b.height, 0.035], [0, b.y, b.z], glass);
     for (const x of [-0.91, 0.91]) box(scene, [0.045, b.height + 0.05, 0.05], [x, b.y, b.z], palette.cream);
@@ -291,9 +308,11 @@ export class Arena {
     this.scene.traverse(m => {
       if (!m.isMesh || m.isSkinnedMesh || m.isInstancedMesh || Array.isArray(m.material) || m.material.isShaderMaterial || m.material.transparent || m.material.map || m.material === this.rimMaterial || m.material === this.boardLight) return;
       let p = m; while (p) { if (p === this.rackGroup || p === this.rimPivot) return; p = p.parent; }
-      const group = groups.get(m.material) || []; group.push(m); groups.set(m.material, group);
+      // Roof steel and the upper bowl are kept out of the floor's reflection.
+      const key = m.userData.noMirror ? `${m.material.uuid}|hidden` : m.material.uuid, group = groups.get(key) || { material: m.material, hidden: !!m.userData.noMirror, objects: [] };
+      group.objects.push(m); groups.set(key, group);
     });
-    for (const [mat, objects] of groups) {
+    for (const { material: mat, hidden, objects } of groups.values()) {
       if (objects.length < 2) continue;
       const geometries = objects.map(m => { const g = m.geometry.clone(); g.applyMatrix4(m.matrixWorld); if (g.index) return g.toNonIndexed(); return g; });
       // Geometry primitives can carry different optional attributes; these
@@ -301,7 +320,7 @@ export class Arena {
       for (const g of geometries) for (const name of Object.keys(g.attributes)) if (!['position', 'normal'].includes(name)) g.deleteAttribute(name);
       const merged = mergeGeometries(geometries, false); for (const g of geometries) g.dispose();
       if (!merged) continue;
-      const batch = new THREE.Mesh(merged, mat); batch.castShadow = objects.some(o => o.castShadow); batch.receiveShadow = true; this.scene.add(batch);
+      const batch = new THREE.Mesh(merged, mat); batch.castShadow = objects.some(o => o.castShadow); batch.receiveShadow = true; if (hidden) batch.layers.set(NO_MIRROR); this.scene.add(batch);
       for (const m of objects) m.parent.remove(m);
     }
   }
@@ -372,6 +391,7 @@ export class Arena {
     this.cheer += (Math.min(1, this.cheerGoal) - this.cheer) * (1 - Math.exp(-dt * (this.cheerGoal > this.cheer ? 9 : 2.2)));
     this.crowdUniforms.uCheer.value = this.cheer; this.crowdUniforms.uCrowdTime.value = now;
     this.buzzer = Math.max(0, (this.buzzer || 0) - dt); this.boardLight.opacity = this.buzzer > 0 ? 0.95 : 0;
+    for (const [i, t] of this.ribbonTextures.entries()) t.offset.x = (t.offset.x + dt * (i === 1 ? -0.012 : 0.02) / Math.max(t.repeat.x, 0.2)) % 1;
     this.rackGroup.visible = engine.mode === 'contest' && !engine.preview;
     if (this.rackGroup.visible) this.rackBalls.forEach((b, i) => { b.visible = i > engine.rack * 5 + engine.rackBall; });
     this.boardTick = (this.boardTick || 0) + dt;
@@ -379,12 +399,13 @@ export class Arena {
   }
   event(e) {
     if (e.type === 'net') { this.netKick = Math.min(1.5, 0.55 + (e.speed || 3) * 0.12) * (e.clean ? 1.15 : 0.8); this.netTime = 0; this.netWasMoving = true; }
-    else if (e.type === 'score') { this.flash = 0.8; this.cheerGoal = Math.max(this.cheerGoal, e.dunk ? 2.2 : e.value === 3 || e.green ? 1.7 : 1.2); if (e.dunk) this.rimFlex = 0.7; }
-    else if (e.type === 'block') this.cheerGoal = Math.max(this.cheerGoal, e.swat ? 1.5 : 0.9);
-    else if (e.type === 'steal' || e.type === 'move' && e.broke) this.cheerGoal = Math.max(this.cheerGoal, 1);
+    // How many get to their feet: a few for a bucket, most of the building for a dunk.
+    else if (e.type === 'score') { this.flash = 0.8; this.cheerGoal = Math.max(this.cheerGoal, e.dunk ? 1.25 : e.value === 3 || e.green ? 0.85 : 0.5); if (e.dunk) this.rimFlex = 0.7; }
+    else if (e.type === 'block') this.cheerGoal = Math.max(this.cheerGoal, e.swat ? 0.8 : 0.45);
+    else if (e.type === 'steal' || e.type === 'move' && e.broke) this.cheerGoal = Math.max(this.cheerGoal, 0.5);
     else if (e.type === 'rim' && e.speed > 2.5) this.rimFlex = Math.max(this.rimFlex, 0.12);
     else if (e.type === 'buzzer') this.buzzer = 1.1;
     else if (e.type === 'whistle') this.buzzer = 0.45;
-    else if (e.type === 'finish') this.cheerGoal = 2.6;
+    else if (e.type === 'finish') this.cheerGoal = 2.2;
   }
 }

@@ -220,13 +220,14 @@ export function releaseQuality(charge, difficulty = 'park', heat = false, rhythm
 
 // Natural launch elevation for a jump shot: flatter from range, higher close in.
 export function shotElevation(distance, rise) {
-  return clamp(0.82 + 0.5 * Math.atan2(rise, Math.max(distance, 0.1)) + 0.03, 0.8, 1.06);
+  // From the arc this lands at roughly a 46 degree entry, a flat-ish, repeatable three.
+  return clamp(0.795 + 0.5 * Math.atan2(rise, Math.max(distance, 0.1)) + 0.03, 0.79, 1.05);
 }
 
 // One release. Timing, balance, fatigue and defensive pressure become errors
 // in launch speed and heading, so the same lapse costs more from deep than at
 // the elbow, and the ball then has to beat the real rim.
-export function makeShot({ from, feet, aim, charge = 0.72, physicalVelocity = null, contest = 0, difficulty = 'park', heat = false,
+export function makeShot({ from, feet, aim, charge = CONFIG.shot.idealTime, physicalVelocity = null, contest = 0, difficulty = 'park', heat = false,
   rng = Math.random, dunk = false, layup = false, floater = false, fade = false, moving = 0, fatigue = 0, rhythm = false, wobble = 0 }) {
   const h = CONFIG.hoop, d = DIFFICULTIES[difficulty];
   const dist = Math.hypot(from.x - h.x, from.z - h.z);

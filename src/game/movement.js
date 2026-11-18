@@ -111,14 +111,17 @@ export function dribbleOffset(p) {
 // The path of a gathered ball through a jump shot: into the shot pocket,
 // up the body to the set point above the shooting eye, then out along the
 // release. `charge` is seconds since the gather; `finish` reaches for the rim.
-const POCKET = new Vec3(0.17, 1.04, 0.3), SET = new Vec3(0.16, 1.93, 0.25), RELEASE = new Vec3(0.15, 2.22, 0.29);
+// The pocket sits at the shooting hip; the lift is a straight line past the
+// face to a set point over the shooting eye, elbow under the ball.
+const POCKET = new Vec3(0.21, 1.0, 0.25), SET = new Vec3(0.15, 1.94, 0.23), RELEASE = new Vec3(0.15, 2.22, 0.3);
 // Seen through the shooter's own eyes the same motion is carried a little
 // wider and further out, so the ball frames the rim instead of hiding it.
 const EYE_POCKET = new Vec3(0.24, 1.16, 0.5), EYE_SET = new Vec3(0.27, 1.8, 0.56), EYE_RELEASE = new Vec3(0.24, 2.02, 0.56);
 export function heldOffset(p, charge, out = new Vec3()) {
   const scale = (p.height || 1.92) / 1.92, eye = !!p.eyeView;
-  // Full extension arrives with the ideal release, at the top of the jump.
-  const lift = ease(clamp((charge - 0.16) / 0.34, 0, 1)), extend = ease(clamp((charge - 0.52) / 0.2, 0, 1));
+  // The ball is set before take-off; the push starts just after the feet
+  // leave and full extension arrives with the ideal release, at the top.
+  const S = CONFIG.shot, lift = ease(clamp((charge - 0.07) / (S.takeoff - 0.09), 0, 1)), extend = ease(clamp((charge - (S.takeoff + 0.05)) / (S.idealTime - S.takeoff - 0.05), 0, 1));
   out.lerpVectors(eye ? EYE_POCKET : POCKET, eye ? EYE_SET : SET, lift).lerp(eye ? EYE_RELEASE : RELEASE, extend);
   out.x *= p.side; out.y *= scale;
   return out;

@@ -20,7 +20,7 @@ await page.goto(`${url}/?test`); await page.waitForFunction(() => window.__rimru
 const data = await page.evaluate(async (sheet) => {
   const g = window.__rimrun, e = g.engine, i = g.input;
   const gl = g.renderer.domElement, real = g.renderer.render.bind(g.renderer);
-  let camera; g.scene.traverse(o => { if (o.isPerspectiveCamera) camera = o; });
+  const camera = g.camera;
   const cells = [];
   const run = n => { g.renderer.render = () => {}; for (let k = 0; k < n; k++) window.__frame(); g.renderer.render = real; };
   const until = (f, max = 600) => { g.renderer.render = () => {}; let k = 0; while (!f() && k++ < max) window.__frame(); g.renderer.render = real; };
@@ -46,10 +46,10 @@ const data = await page.evaluate(async (sheet) => {
   if (sheet === 'shot') {
     begin('practice', true); e.human.pos.set(2.5, 0, -1.5); i.yaw = Math.atan2(-2.5, -6.1 + 1.5); run(20);
     i.mouseHeld = true; i.push('gather', true); run(1);
-    for (const c of [0.1, 0.3, 0.46, 0.6, 0.72]) { until(() => e.charge >= c); snap(`charge ${e.charge.toFixed(2)} jump ${e.human.jump.toFixed(2)}`, c < 0.5 ? SIDE : FRONT); }
+    for (const c of [0.06, 0.16, 0.3, 0.4, 0.5, 0.62]) { until(() => e.charge >= c); snap(`charge ${e.charge.toFixed(2)} jump ${e.human.jump.toFixed(2)}`, c < 0.2 || c === 0.4 ? SIDE : FRONT); }
     snap('release side', SIDE);
     i.mouseHeld = false; i.push('release', {}); run(1); snap('released +1f', SIDE);
-    run(5); snap('follow +0.1', FRONT); run(9); snap('follow +0.25', SIDE); run(14); snap('follow +0.5', FRONT); run(20); snap('land', SIDE);
+    run(5); snap('follow +0.1', FRONT); run(9); snap('follow +0.25', SIDE); run(14); snap('follow +0.5', FRONT); run(20); snap('land +0.8', SIDE);
     until(() => e.ownerId === 0, 400); run(30); snap('dribble idle', FRONT);
   } else if (sheet === 'handles') {
     begin('practice', true); e.human.pos.set(0, 0, 1); i.yaw = Math.PI; run(30);
@@ -81,15 +81,15 @@ const data = await page.evaluate(async (sheet) => {
     }
   } else if (sheet === 'rim') {
     begin('practice', true); e.human.pos.set(2.2, 0, -3.6); i.yaw = Math.atan2(-2.2, -6.1 + 3.6); run(10);
-    i.keys.add('KeyW'); run(22); i.mouseHeld = true; i.push('gather', true); until(() => e.charge >= 0.5); snap('layup gather', SIDE); until(() => e.charge >= 0.7); snap('layup up', SIDE);
+    i.keys.add('KeyW'); run(22); i.mouseHeld = true; i.push('gather', true); until(() => e.charge >= 0.4); snap('layup gather', SIDE); until(() => e.charge >= 0.6); snap('layup up', SIDE);
     i.mouseHeld = false; i.push('release', {}); run(2); i.keys.delete('KeyW'); snap(`layup release bank=${e.shot?.bank}`, FRONT); run(8); snap('layup +8f', { from: [4.5, 2.6, -2.5], at: [0, 2.9, -6.1], fov: 45 }); run(14); snap('layup +22f', { from: [4.5, 2.6, -2.5], at: [0, 2.9, -6.1], fov: 45 }); run(30); snap(`after: ${e.lastResult?.label}`, { from: [4.5, 2.6, -2.5], at: [0, 2.6, -6.1], fov: 45 });
     until(() => e.ownerId === 0, 400); e.human.pos.set(0, 0, -4.4); i.yaw = Math.PI; run(10); i.keys.add('KeyW'); i.keys.add('ShiftLeft'); until(() => e.human.pos.z < -5.0, 200);
-    i.mouseHeld = true; i.push('gather', true); until(() => e.charge >= 0.6); i.keys.delete('KeyW'); snap('dunk rise', SIDE); until(() => e.charge >= 0.72); snap(`dunk top y=${e.ball.pos.y.toFixed(2)}`, SIDE);
+    i.mouseHeld = true; i.push('gather', true); until(() => e.charge >= 0.5); i.keys.delete('KeyW'); snap('dunk rise', SIDE); until(() => e.charge >= 0.62); snap(`dunk top y=${e.ball.pos.y.toFixed(2)}`, SIDE);
     i.mouseHeld = false; i.push('release', {}); run(3); snap(`dunk=${e.shot?.dunk} +3f`, { from: [3, 3.2, -3.5], at: [0, 3, -6.1], fov: 45 }); run(8); snap('dunk +11f', { from: [3, 3.2, -3.5], at: [0, 3, -6.1], fov: 45 }); run(20); snap(`after ${e.lastResult?.label}`, { from: [3, 3.2, -3.5], at: [0, 2.6, -6.1], fov: 45 });
   } else if (sheet === 'views') {
     hud(true);
-    begin('1v1'); hud(true); run(80); snap('1v1 first person'); i.mouseHeld = true; i.push('gather', true); until(() => e.charge >= 0.4); snap('FP gather .4'); until(() => e.charge >= 0.7); snap('FP gather .7'); i.mouseHeld = false; i.push('release', {}); run(8); snap('FP released'); run(40); snap('FP result');
-    begin('1v1', true); hud(true); run(80); snap('third person'); i.mouseHeld = true; i.push('gather', true); until(() => e.charge >= 0.7); snap('TP gather .7'); i.mouseHeld = false; i.push('release', {}); run(10); snap('TP released'); run(50); snap('TP result');
+    begin('1v1'); hud(true); run(80); snap('1v1 first person'); i.mouseHeld = true; i.push('gather', true); until(() => e.charge >= 0.3); snap('FP gather .3'); until(() => e.charge >= 0.6); snap('FP gather .6'); i.mouseHeld = false; i.push('release', {}); run(8); snap('FP released'); run(40); snap('FP result');
+    begin('1v1', true); hud(true); run(80); snap('third person'); i.mouseHeld = true; i.push('gather', true); until(() => e.charge >= 0.6); snap('TP gather .6'); i.mouseHeld = false; i.push('release', {}); run(10); snap('TP released'); run(50); snap('TP result');
     g.startDemo('2v2'); run(400); snap('demo 2v2'); run(300); snap('demo 2v2 later');
   }
   const cols = 4, rows = Math.ceil(cells.length / cols), sheetCanvas = document.createElement('canvas'); sheetCanvas.width = cols * 440; sheetCanvas.height = rows * 360;

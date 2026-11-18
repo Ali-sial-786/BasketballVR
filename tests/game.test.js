@@ -6,13 +6,14 @@ import { CONFIG } from '../src/config.js';
 const advance = (g, seconds, command = {}) => { for (let i = 0; i < Math.ceil(seconds * 120); i++) g.step(1 / 120, command); };
 const fresh = mode => { const e = new GameEngine({ rng: () => 0.5 }); e.start(mode); e.checkTimer = 0; e.updateAI = () => {}; return e; };
 const aim = g => new Vec3(-g.human.pos.x, 0, CONFIG.hoop.z - g.human.pos.z).normalize();
-function cleanShot(g) { g.charge = 0.72; g.ballState = 'held'; g.updateOwnedBall(0); return g.shoot(g.human, { aim: aim(g) }); }
+const T = CONFIG.shot.idealTime;
+function cleanShot(g) { g.charge = T; g.ballState = 'held'; g.updateOwnedBall(0); return g.shoot(g.human, { aim: aim(g) }); }
 test('four modes create the correct roster, and 1v1 does not fabricate a pass', () => {
   for (const [mode, count] of [['1v1', 2], ['2v2', 4], ['practice', 1], ['contest', 1]]) assert.equal(fresh(mode).players.length, count);
   const g = fresh('1v1'); assert(!g.pass(g.human)); assert.equal(g.ownerId, 0);
 });
 test('charging and a release make one attempt, then practice returns the ball', () => {
-  const g = fresh('practice'); g.step(1 / 120, { gather: true }); advance(g, 0.7);
+  const g = fresh('practice'); g.step(1 / 120, { gather: true }); advance(g, T - 0.02);
   g.step(1 / 120, { aim: aim(g), release: {} }); assert.equal(g.stats.attempts, 1);
   g.step(1 / 120, { aim: aim(g), release: {} }); assert.equal(g.stats.attempts, 1);
   advance(g, 3); assert.equal(g.ownerId, 0); assert.equal(g.stats.made, 1);
@@ -65,8 +66,8 @@ test('a defender can intercept a real pass in flight', () => {
   assert.equal(g.ownerId, 2); assert(g.needsClear); assert.equal(g.stats.steals, 0);
 });
 test('reaching a rising shot while jumping creates a physical block', () => {
-  const g = fresh('1v1'), d = g.players[1]; d.pos.set(0, 0, -2); g.giveBall(d); d.charge = 0.72;
-  g.human.pos.set(0, 0, -2.6); g.human.yaw = 0; g.human.jump = 0.45; g.human.jumpVel = 1; g.shoot(d, { aiCharge: 0.72 });
+  const g = fresh('1v1'), d = g.players[1]; d.pos.set(0, 0, -2); g.giveBall(d); d.charge = T;
+  g.human.pos.set(0, 0, -2.6); g.human.yaw = 0; g.human.jump = 0.45; g.human.jumpVel = 1; g.shoot(d, { aiCharge: T });
   advance(g, 0.14); assert.equal(g.stats.blocks, 1); assert.equal(g.score[1], 0);
 });
 test('shot clock and out-of-bounds hand the check to the other team', () => {
@@ -74,7 +75,7 @@ test('shot clock and out-of-bounds hand the check to the other team', () => {
   g.checkTimer = 0; g.ownerId = null; g.ballState = 'loose'; g.ball.pos.set(8, 0.2, 0); g.lastTouch = 2; g.boundaries(); assert.equal(g.checkTeam, 0);
 });
 test('a real tracked hand can block without an artificial jump', () => {
-  const g = fresh('1v1'), d = g.players[1]; d.pos.set(0, 0, -2); g.giveBall(d); g.shoot(d, { aiCharge: 0.72 });
+  const g = fresh('1v1'), d = g.players[1]; d.pos.set(0, 0, -2); g.giveBall(d); g.shoot(d, { aiCharge: T });
   g.step(1 / 120, { hands: [g.ball.pos.clone()] }); assert.equal(g.human.jump, 0); assert.equal(g.stats.blocks, 1);
 });
 test('pause freezes the clock and discards the gathered shot', () => {
@@ -153,7 +154,7 @@ test('an on-ball defender in front affects a release more than a trailing defend
 
 test('a close finish launches downward from the gathered ball and crosses the rim', () => {
   const g = fresh('practice'); g.human.pos.set(0, 0, CONFIG.hoop.z + 0.4); g.updateOwnedBall(0);
-  advance(g, 0.72, { gather: true, aim: aim(g), autoJump: true });
+  advance(g, T, { gather: true, aim: aim(g), autoJump: true });
   const hand = g.ball.pos.clone();
   g.step(1 / 120, { release: {}, aim: aim(g) });
   assert(g.shot.dunk); assert(g.shot.vel.y < 0); assert(g.shot.origin.distanceTo(hand) < 1e-8);
@@ -202,10 +203,10 @@ test('a quick tap is a pump fake: no attempt, a live dribble, and a defender who
 });
 test('a block needs a hand on the ball: feet on the floor do not get there, and a touch on the way down is goaltending', () => {
   const grounded = fresh('1v1'), d = grounded.players[1]; d.pos.set(0, 0, -2); grounded.giveBall(d);
-  grounded.human.pos.set(0, 0, -2.6); grounded.human.yaw = 0; grounded.shoot(d, { aiCharge: 0.72 });
+  grounded.human.pos.set(0, 0, -2.6); grounded.human.yaw = 0; grounded.shoot(d, { aiCharge: T });
   advance(grounded, 0.3); assert.equal(grounded.stats.blocks, 0); assert.equal(grounded.ballState, 'flight');
   const g = fresh('1v1'), shooter = g.players[1]; shooter.pos.set(0, 0, 0.9); g.giveBall(shooter); g.human.pos.set(5, 0, 3);
-  g.shoot(shooter, { aiCharge: 0.72 }); const value = g.shot.value;
+  g.shoot(shooter, { aiCharge: T }); const value = g.shot.value;
   for (let i = 0; i < 400 && !(g.ball.vel.y < 0 && g.ball.pos.y < 3.7); i++) g.step(1 / 120);
   assert(g.ball.pos.y > CONFIG.hoop.y); g.step(1 / 120, { hands: [g.ball.pos.clone()] });
   assert.deepEqual(g.score, [0, value]); assert.equal(g.stats.blocks, 0); assert(g.checkTimer > 0); assert.equal(g.lastResult.label, 'GOALTENDING');
@@ -214,10 +215,10 @@ test('shot feedback names what happened: a swish, a short miss, a bank', () => {
   const result = g => { advance(g, 2.2); return g.lastResult; };
   const pure = fresh('practice'); cleanShot(pure); assert.equal(pure.shot.kind, 'jumper'); assert.deepEqual(result(pure), { made: true, label: 'SWISH', shooter: 0 });
   assert.equal(pure.stats.swishes, 1);
-  const early = fresh('practice'); early.charge = 0.42; early.ballState = 'held'; early.updateOwnedBall(0); early.shoot(early.human, { aim: aim(early) });
+  const early = fresh('practice'); early.charge = T - 0.3; early.ballState = 'held'; early.updateOwnedBall(0); early.shoot(early.human, { aim: aim(early) });
   assert.equal(early.shot.timing, 'EARLY'); assert(early.shot.offset < -0.25); const miss = result(early); assert.equal(miss.made, false); assert.match(miss.label, /SHORT/);
   const glass = fresh('practice'); glass.human.pos.set(1.7, 0, -5); glass.human.locoVel.set(-1.5, 0, -1.5); glass.human.jump = 0.5;
-  glass.charge = 0.72; glass.ballState = 'held'; glass.updateOwnedBall(0); glass.shoot(glass.human, { aim: aim(glass) });
+  glass.charge = T; glass.ballState = 'held'; glass.updateOwnedBall(0); glass.shoot(glass.human, { aim: aim(glass) });
   assert(glass.shot.layup && glass.shot.bank); assert.equal(glass.shot.value, 2); assert.match(result(glass).label, /GLASS/);
 });
 test('a move breaks ankles only when the defender is going the wrong way', () => {
@@ -251,4 +252,21 @@ test('a tired shooter is less accurate and a fadeaway is harder to contest', () 
   const f = fresh('1v1'), e = f.players[1]; f.human.pos.set(0, 0, 0); e.pos.set(0, 0, -1); e.yaw = 0; e.defending = true;
   f.human.locoVel.set(0, 0, 1.6); cleanShot(f); assert(f.shot.fade); assert.equal(f.shot.kind, 'fadeaway'); assert(f.shot.contest < squared);
   assert(tired < f.shot.quality + 0.2); assert(!g.shot.green);
+});
+
+test('the jump shot is quick and set early: ball at the set point before take-off, gone at the top, follow-through held', () => {
+  const S = CONFIG.shot, g = fresh('practice'); g.human.pos.set(0, 0, 0.6);
+  assert(S.idealTime <= 0.65, 'a catch-and-shoot release well inside 0.79 s'); assert(S.takeoff < S.idealTime - 0.2);
+  let atTakeoff = null;
+  for (let i = 0; i < 200 && g.charge < S.idealTime; i++) { g.step(1 / 120, { gather: true, aim: aim(g), autoJump: true }); if (atTakeoff === null && g.human.jump > 0) atTakeoff = g.ball.pos.y; }
+  assert(atTakeoff > 1.85, `the ball is set above the forehead before the feet leave (${atTakeoff})`);
+  // Released within a few centimetres of the top of a modest jump, on the way up.
+  assert(g.human.jump > 0.38 && g.human.jump < 0.5); assert(g.human.jumpVel > -0.2 && g.human.jumpVel < 0.9);
+  const before = g.human.pos.clone(); g.step(1 / 120, { release: {}, aim: aim(g) });
+  assert.equal(g.human.action, 'follow'); assert(g.human.actionTime >= 0.95); assert(g.shot.green);
+  assert(g.shot.arc > 46 && g.shot.arc < 52, `launch ${g.shot.arc}`);
+  // The ball comes down into the rim at roughly 46 degrees.
+  let entry = 0; for (let i = 0; i < 400 && !entry; i++) { g.step(1 / 120); if (g.ball.vel.y < 0 && g.ball.pos.y <= CONFIG.hoop.y + 0.05) entry = Math.atan2(-g.ball.vel.y, Math.hypot(g.ball.vel.x, g.ball.vel.z)) * 180 / Math.PI; }
+  assert(entry > 42 && entry < 50, `entry angle ${entry}`);
+  advance(g, 0.6); assert.equal(g.lastResult.label, 'SWISH'); assert(g.human.pos.distanceTo(before) < 0.05, 'straight up and down');
 });

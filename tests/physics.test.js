@@ -28,8 +28,9 @@ test('floor bounces lose energy and never sink through the court', () => {
   assert(events.some(e => e.type === 'bounce')); assert(b.pos.y >= CONFIG.ball.radius); assert(Math.abs(b.vel.x) < 2);
 });
 test('release timing, contest and facing all affect the result', () => {
-  assert(releaseQuality(0.72).green); assert.equal(releaseQuality(0.2).timing, 'EARLY'); assert.equal(releaseQuality(1.2).timing, 'LATE');
-  assert(releaseQuality(0.62, 'rookie').green); assert(!releaseQuality(0.62, 'allstar').green);
+  const T = CONFIG.shot.idealTime;
+  assert(releaseQuality(T).green); assert.equal(releaseQuality(0.1).timing, 'EARLY'); assert.equal(releaseQuality(1.1).timing, 'LATE');
+  assert(releaseQuality(T - 0.1, 'rookie').green); assert(!releaseQuality(T - 0.1, 'allstar').green);
   const base = { from: new Vec3(0, 2, 1), feet: new Vec3(0, 0, 1), aim: new Vec3(0, 0, -1), rng: () => 0.6 };
   assert(makeShot(base).quality > makeShot({ ...base, contest: 1 }).quality);
   const away = makeShot({ ...base, aim: new Vec3(1, 0, 0) }); assert(!away.assisted); assert(away.vel.x > 0);
@@ -56,14 +57,14 @@ test('setting your feet improves a jump shot, while a close layup keeps its soft
 test('the same mistimed release costs more from deep than from the elbow', () => {
   const landing = distance => {
     const from = new Vec3(0, 2.45, CONFIG.hoop.z + distance), base = { from, feet: from, aim: new Vec3(0, 0, -1), rng: () => 0.5 };
-    const shot = makeShot({ ...base, charge: 0.52 }); assert.equal(shot.timing, 'EARLY');
+    const shot = makeShot({ ...base, charge: CONFIG.shot.idealTime - 0.2 }); assert.equal(shot.timing, 'EARLY');
     const ball = new Basketball(); ball.launch(from, shot.vel, shot.spin);
     for (let i = 0; i < 400; i++) { ball.substep(1 / 240, null, 0); if (ball.vel.y < 0 && ball.pos.y <= CONFIG.hoop.y) break; }
     return ball.pos.z - CONFIG.hoop.z;
   };
   const elbow = landing(3.2), deep = landing(7.2);
   assert(elbow > 0 && deep > 0, 'an early release falls short of the rim'); assert(deep > elbow * 1.8);
-  const late = makeShot({ from: new Vec3(0, 2.45, 0), feet: new Vec3(), aim: new Vec3(0, 0, -1), charge: 0.95, rng: () => 0.5 });
+  const late = makeShot({ from: new Vec3(0, 2.45, 0), feet: new Vec3(), aim: new Vec3(0, 0, -1), charge: CONFIG.shot.idealTime + 0.23, rng: () => 0.5 });
   const on = makeShot({ from: new Vec3(0, 2.45, 0), feet: new Vec3(), aim: new Vec3(0, 0, -1), rng: () => 0.5 });
   assert(late.vel.length() > on.vel.length(), 'a late release is pushed long');
 });

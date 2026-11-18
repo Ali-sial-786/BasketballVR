@@ -116,17 +116,19 @@ const posed = async (mode, prepare, frames = 1) => {
   const joint = (i, name) => views[i].h.worldPos(name, new THREE.Vector3());
   return { g, views, tick, hand, joint, ball: () => new THREE.Vector3().copy(g.ball.pos), done: () => views.forEach(v => v.dispose(scene)) };
 };
+const { CONFIG: { shot: CONFIG_SHOT } } = await import('../src/config.js');
 const aimAt = g => ({ x: -g.human.pos.x, y: 0, z: -6.1 - g.human.pos.z });
 
 test('a jump shot keeps the shooting hand under the ball to a set point above the head, then holds the follow-through', async () => {
   const s = await posed('practice', async (g, tick) => { for (let i = 0; i < 20; i++) tick({ aim: aimAt(g) }); });
   const { g, tick, hand, joint, ball } = s; let lastY = 0;
-  while (g.charge < 0.7) {
+  const S = CONFIG_SHOT;
+  while (g.charge < S.idealTime - 0.02) {
     tick({ gather: true, aim: aimAt(g), autoJump: true });
-    if (g.charge > 0.25) {
+    if (g.charge > 0.22) {
       // Cradled to the set point, then rolling up onto the fingertips at full extension.
-      assert(hand(0, 'R').distanceTo(ball()) < (g.charge < 0.55 ? 0.24 : 0.32), `shooting hand left the ball at ${g.charge.toFixed(2)}`);
-      if (g.charge < 0.5) assert(hand(0, 'L').distanceTo(ball()) < 0.26, 'guide hand stays on the side of the ball up to the set point');
+      assert(hand(0, 'R').distanceTo(ball()) < (g.charge < S.takeoff + 0.12 ? 0.24 : 0.32), `shooting hand left the ball at ${g.charge.toFixed(2)}`);
+      if (g.charge < S.takeoff + 0.08) assert(hand(0, 'L').distanceTo(ball()) < 0.26, 'guide hand stays on the side of the ball up to the set point');
       assert(hand(0, 'R').y < ball().y + 0.02, 'the shooting hand is under the ball, not on top of it');
     }
     assert(ball().y >= lastY - 0.02, 'the ball never dips once it starts up'); lastY = ball().y;

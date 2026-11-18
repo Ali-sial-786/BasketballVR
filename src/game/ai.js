@@ -58,7 +58,7 @@ function handle(g, p, dt, target, diff) {
     // With a defender in their chest a shooter fades away from the contest.
     else if (gap < 1.35 && between > 0.4) { target.copy(p.pos).addScaled(lane, -1.4); cap *= 0.62; }
     else target.copy(p.pos);
-    if (p.aiPump && p.charge >= 0.17) { p.aiPump = false; g.pumpFake(p); p.aiQuick = g.time + 1.2; return cap; }
+    if (p.aiPump && p.charge >= CONFIG.shot.pumpWindow - 0.03) { p.aiPump = false; g.pumpFake(p); p.aiQuick = g.time + 1.2; return cap; }
     if (p.charge > shot.takeoff && p.charge < shot.takeoff + dt * 1.5) g.jump(p);
     if (p.charge >= shot.idealTime) g.shoot(p, { aiCharge: p.aiRelease });
     return cap;
@@ -190,7 +190,7 @@ function defend(g, p, owner, dt, target, diff) {
     // closeouts stay down with a hand up; a jump has to be timed to matter.
     if (p.planFor !== g.gatherCount) {
       p.planFor = g.gatherCount;
-      p.planJump = rng() < (range < 3 ? 0.65 : diff.jumpiness) ? 0.46 + rng() * (0.5 - diff.jumpiness * 0.5) : Infinity;
+      p.planJump = rng() < (range < 3 ? 0.65 : diff.jumpiness) ? CONFIG.shot.takeoff + 0.02 + rng() * (0.5 - diff.jumpiness * 0.5) : Infinity;
     }
     if (charge > p.planJump && near < 1.6) g.jump(p);
   }

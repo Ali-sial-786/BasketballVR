@@ -56,7 +56,7 @@ try {
       } else ['cross', 'legs', 'behind', 'spin', 'hesi', 'stepback'].forEach((move, n) => { if (is(4.1 + n * 0.72)) i.push('moveAction', move); });
       const shotAt = name === 'baseline' ? 7.3 : 8.9;
       if (is(shotAt)) { aim(); i.push('gather', true); note.textContent = 'SHOOTING / DIP, RISE, RELEASE AT THE TOP'; }
-      if (is(shotAt + 0.72)) i.push('release', {});
+      if (is(shotAt + (name === 'baseline' ? 0.72 : 0.62))) i.push('release', {});
       if (is(13)) {
         if (g.startDemo) { g.startDemo('2v2'); seedMatch(215); } else { g.home(); document.body.classList.add('capture-scrimmage'); }
         note.textContent = '2V2 / LIVE AI SCRIMMAGE — NORMAL MATCH RULES';

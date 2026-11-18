@@ -240,7 +240,7 @@ export class GameEngine {
     if (gathered) local = heldOffset(p, charge);
     else {
       local = dribbleOffset(p);
-      if (p.pump > 0) local.lerp(heldOffset(p, 0.44), Math.pow(Math.sin(Math.PI * (1 - p.pump / PUMP)), 0.8));
+      if (p.pump > 0) local.lerp(heldOffset(p, CONFIG.shot.takeoff), Math.pow(Math.sin(Math.PI * (1 - p.pump / PUMP)), 0.8));
     }
     this.ball.pos.copy(p.pos).addScaled(forward, local.z).addScaled(right, local.x);
     this.ball.pos.y = p.jump + local.y;
@@ -313,7 +313,7 @@ export class GameEngine {
     this.lastShot = this.shot;
     this.ball.launch(origin, shot.vel, shot.spin); this.ownerId = null; this.ballState = 'flight'; this.flightAge = 0; this.liveRebound = true;
     this.lastTouch = p.id; this.charge = 0; this.passInfo = null; this.catchFrom = null;
-    p.action = dunk ? 'dunk' : layup || floater ? 'layup' : 'follow'; p.actionTime = 0.8; p.charge = 0; p.moveState = null; p.pump = 0;
+    p.action = dunk ? 'dunk' : layup || floater ? 'layup' : 'follow'; p.actionTime = dunk || layup || floater ? 0.8 : CONFIG.shot.followThrough; p.charge = 0; p.moveState = null; p.pump = 0;
     if (p.id === 0) this.stats.attempts++;
     this.emit('shot', { shot: this.shot, player: p.id, human });
     return true;

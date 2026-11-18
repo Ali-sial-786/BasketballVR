@@ -25,7 +25,11 @@ export class PlayerView {
     this.id = player.id; this.phase = player.id * 1.8; this.footwork = new Footwork(); this.bodyYaw = player.yaw;
     const scale = (player.height || CONFIG.player.heights[player.id]) / 1.8;
     this.h = new Humanoid({ team: player.team === 0 ? 'home' : 'away', headgear: 'bare', skin: SKINS[player.id], hair: [0x30251e, 0x191715, 0x1e1915, 0x503829][player.id], seed: player.id * 13 + 5, scale });
-    this.h.setNumber([1, 7, 23, 11][player.id]); this.root = this.h.root; this.root.name = `athlete-${player.name}`;
+    this.h.setNumber([1, 7, 23, 11][player.id]);
+    // Everyone wears their own kit: sleeves, bands, shoes and a haircut.
+    this.h.setGear([{ wristbands: true, color: 0xf1ead6, shoe: 0xf2f2ee, fade: 0.55 }, { headband: true, leg: 'L', color: 0xf1ead6, shoe: 0x1b1d22 },
+      { sleeve: 'R', color: 0x17191d, shoe: 0xf2f2ee, fade: 0.85 }, { headband: true, wristbands: true, color: 0x17191d, shoe: 0xc45d3e, fade: 0.3 }][player.id]);
+    this.root = this.h.root; this.root.name = `athlete-${player.name}`;
     const frontTexture = canvasTexture(256, 320, (c, w) => {
       c.fillStyle = player.team === 0 ? '#e5ddb7' : '#ffe0b9'; c.textAlign = 'center';
       c.font = '900 29px Arial'; c.fillText('R I M R U N', w / 2, 55);
@@ -68,13 +72,18 @@ export class PlayerView {
     const finishing = gathered && p.jump > 0.1 && hoopGap < 2.9 && !(human && engine.hand);
     const celebrating = engine.checkTimer > 0 && engine.lastScore && engine.time - engine.lastScore.time < 2 && engine.lastScore.team === p.team;
 
-    // A stepback is a real two-foot hop; everything else stays on the floor.
-    const hop = move?.kind === 'stepback' ? Math.sin(Math.PI * moveT) * 0.09 : 0;
+    // A stepback is a real two-foot hop. A jump shooter also hops into a wide,
+    // parallel base as the ball arrives in the pocket; finishes at the rim do not.
+    const S = CONFIG.shot, jumper = (gathered || p.action === 'follow') && hoopGap >= 2.9 && !(human && engine.hand);
+    const hop = move?.kind === 'stepback' ? Math.sin(Math.PI * moveT) * 0.09 : jumper && gathered && charge < 0.15 ? Math.sin(Math.PI * charge / 0.15) * 0.04 : 0;
+    // The shooting shoulder sits a touch ahead of the other: about ten degrees of turn.
+    this.turn = (this.turn || 0) + ((jumper ? 1 : 0) - (this.turn || 0)) * (1 - Math.exp(-dt * 9));
     this.root.position.set(p.pos.x, p.jump + hop, p.pos.z);
     const facing = p.action === 'pass' && !firstPerson ? p.passYaw : p.yaw;
     this.bodyYaw = firstPerson ? p.yaw : this.bodyYaw + THREE.MathUtils.clamp(wrappedAngle(this.bodyYaw, facing), -dt * 10, dt * 10);
     this.root.rotation.set(0, this.bodyYaw, 0);
     if (!firstPerson && move?.kind === 'spin') this.root.rotation.y += ease(moveT) * Math.PI * 2 * -move.fromSide;
+    if (!firstPerson) this.root.rotation.y += 0.17 * p.side * this.turn;
 
     applyClip(h, p.defending && !owns ? 'set' : 'idle', time + this.id * 0.45);
     // The uploaded Mixamo take supplies the actual weight shift, shoulder and
@@ -111,10 +120,12 @@ export class PlayerView {
     }
     if (gathered) {
       // Dip, load and rise: the legs drive the shot before the arm does.
-      crouch += 0.17 * Math.sin(Math.PI * clamp01(charge / CONFIG.shot.takeoff)) + 0.03 * (1 - clamp01(charge / 0.2));
-      lean += 0.08 * (1 - clamp01(charge / 0.4)) - 0.07 * clamp01((charge - 0.5) / 0.25);
+      // A quick, shallow load: the knees flex as the ball is set and are
+      // already driving up when it starts forward. Straight up and down.
+      crouch += 0.15 * Math.sin(Math.PI * clamp01(charge / S.takeoff)) + 0.03 * (1 - clamp01(charge / 0.16));
+      lean += 0.07 * (1 - clamp01(charge / S.takeoff)) - 0.03 * clamp01((charge - S.takeoff) / 0.2);
     }
-    if (following) lean -= p.action === 'follow' ? 0.06 : -0.05;
+    if (following) lean -= p.action === 'follow' ? 0.02 : -0.05;
     if (p.action === 'reach') { const u = 1 - p.actionTime / 0.36; crouch += 0.1 * Math.sin(Math.PI * u); lean += 0.34 * Math.sin(Math.PI * u); }
     if (p.action === 'pass') { const u = 1 - p.actionTime / 0.42; lean += (p.passKind === 'lob' ? -0.08 : 0.16) * Math.sin(Math.PI * Math.min(1, u * 1.4)); }
     if (p.defending && !owns && rivalGathering && ballGap < 2.2) crouch -= 0.04;
@@ -155,7 +166,7 @@ export class PlayerView {
       const strong = side === (hand > 0 ? 'R' : 'L');
       let target = null, pitch = null, roll = 0, rate = 16, snap = false;
       let pole = V(sign * 0.5, 1.08, -0.02);
-      if (firstPerson && !strong && (gathered && charge > 0.3 || following)) {
+      if (firstPerson && !strong && (gathered && charge > 0.24 || following)) {
         // Through the shooter's own eyes the guide hand slides off early and
         // stays low, so the forearm never crosses the view of the rim.
         target = localToWorld(V(sign * 0.36, 1.08, 0.34)); pitch = -1.7; roll = sign * 0.3; rate = 14; pole = V(sign * 0.6, 0.9, 0.05);
@@ -167,10 +178,11 @@ export class PlayerView {
         const under = (gathered || p.pump > 0) && strong;
         target = ball.clone().add(V(sign * (under ? 0.045 : 0.125), under ? -0.115 : -0.03, under ? -0.085 : -0.06).applyAxisAngle(UP, this.bodyYaw));
         pitch = under ? (finishing ? -2.35 : -1.92) : -1.72; roll = sign * (under ? 1.18 : 0.25); snap = !receiving;
-        pole = under ? V(sign * 0.3, 1.02, 0.34) : V(sign * 0.56, 1.0, 0.16);
+        // Elbow in, under the ball and in line with the shoulder.
+        pole = under ? V(sign * 0.21, 1.05, 0.5) : V(sign * 0.56, 1.0, 0.16);
         if (receiving) target.lerp(h.worldPos('hand' + side, _current), THREE.MathUtils.smoothstep(ball.distanceTo(_current), 0.45, 2.0));
         // The guide hand comes off as the shooting arm extends past the set point.
-        if (gathered && !under && charge > 0.58 && !finishing) { target = localToWorld(V(sign * 0.21, 1.6, 0.3)); pitch = -2.6; roll = sign * 0.2; snap = false; rate = 20; pole = V(sign * 0.6, 1.25, 0.2); }
+        if (gathered && !under && charge > S.takeoff + 0.1 && !finishing) { target = localToWorld(V(sign * 0.21, 1.6, 0.3)); pitch = -2.6; roll = sign * 0.2; snap = false; rate = 20; pole = V(sign * 0.6, 1.25, 0.2); }
       } else if (dribbling && strong) {
         // The hand rides the ball through the top of each bounce, pushes it
         // down, then waits for it rather than chasing it to the floor.
@@ -191,13 +203,16 @@ export class PlayerView {
       } else if (following) {
         // Hold the follow-through: full extension, wrist snapped over, while
         // the guide hand stays quiet where the ball left it.
-        const out = clamp01((0.8 - p.actionTime) / 0.13), relax = clamp01((0.38 - p.actionTime) / 0.38);
+        // A jump shooter locks the elbow out above the head with a loose wrist
+        // and keeps it there until the ball is nearly at the rim.
+        const total = p.action === 'follow' ? S.followThrough : 0.8, ending = p.action === 'follow' ? 0.3 : 0.38;
+        const out = clamp01((total - p.actionTime) / 0.12), relax = clamp01((ending - p.actionTime) / ending);
         if (p.action === 'dunk' && strong) { target = new THREE.Vector3(CONFIG.hoop.x, CONFIG.hoop.y - 0.02 - relax * 0.5, CONFIG.hoop.z).addScaledVector(V(0, 0, -0.22).applyAxisAngle(UP, this.bodyYaw), 1); pitch = -1.1; }
         else if (strong) {
           const layup = p.action === 'layup';
-          target = localToWorld(V(sign * 0.15, (layup ? 2.26 : 2.2) + 0.1 * out - 0.75 * ease(relax), (layup ? 0.36 : 0.4) + 0.16 * out - 0.1 * ease(relax)));
-          pitch = layup ? -2.3 + 0.9 * out : -1.9 + 1.5 * out; roll = sign * 0.5 * (1 - out);
-          pole = V(sign * 0.3, 1.4, 0.5);
+          target = localToWorld(V(sign * 0.15, (layup ? 2.26 : 2.2) + 0.1 * out - 0.75 * ease(relax), (layup ? 0.36 : 0.38) + (layup ? 0.16 : 0.12) * out - 0.1 * ease(relax)));
+          pitch = layup ? -2.3 + 0.9 * out : -1.9 + 1.25 * out; roll = sign * 0.5 * (1 - out);
+          pole = layup ? V(sign * 0.3, 1.4, 0.5) : V(sign * 0.2, 1.5, 0.6);
         } else {
           target = localToWorld(V(sign * (p.action === 'follow' ? 0.24 : 0.34), (p.action === 'follow' ? 1.48 : 1.26) - 0.4 * ease(relax), 0.3)); pitch = -2.5; roll = sign * 0.2; pole = V(sign * 0.6, 1.2, 0.2);
         }
@@ -270,6 +285,8 @@ export class PlayerView {
       let stance = null;
       if (move?.kind === 'legs') { const w = Math.sin(Math.PI * moveT); stance = { width: 0.2 + 0.05 * w, lead: move.toSide > 0 ? 'R' : 'L', split: 0.34 * w }; }
       else if (dribbling && p.protect > 0.3) stance = { width: 0.2 + 0.06 * p.protect, lead: hand > 0 ? 'L' : 'R', split: 0.16 * p.protect };
+      // Wide, feet parallel, shooting foot barely ahead: the same base every time.
+      else if (jumper) stance = { width: 0.215, lead: p.side > 0 ? 'R' : 'L', split: 0.035 };
       this.footwork.update(dt, p, h, gathered, stance, hop);
       if (p.jump + hop < 0.02) h.groundGuard(0.004);
     }

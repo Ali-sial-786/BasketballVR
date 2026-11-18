@@ -41,6 +41,12 @@ try {
   page.setDefaultTimeout(60000);
   await prepare(page); await page.goto(`${url}/?test`); await page.waitForFunction(() => window.__rimrun, null, { polling: 100 });
   assert.equal(await page.locator('.mode-card').count(), 4); assert(await page.locator('#menu').isVisible());
+  // The venue: instanced spectators at two levels of detail, the CC0 hall
+  // lighting and floor detail, and the rich desktop pipeline with its mirror.
+  const venue = await page.evaluate(() => { const g = window.__rimrun, names = []; g.scene.traverse(o => { if (o.isInstancedMesh) names.push(`${o.name}:${o.count}`); });
+    return { names, high: g.pipeline.high, mirror: !!g.pipeline.mirror, hdr: !!g.court.look.hdr, wood: !!g.court.look.woodNormal, knit: !!g.court.look.jerseyNormal }; });
+  assert(venue.names.some(n => /^crowd-lod0:\d{3,}/.test(n)) && venue.names.some(n => /^crowd-lod1:\d{3,}/.test(n)), `crowd meshes: ${venue.names}`);
+  assert.deepEqual({ high: venue.high, mirror: venue.mirror, hdr: venue.hdr, wood: venue.wood, knit: venue.knit }, { high: true, mirror: true, hdr: true, wood: true, knit: true });
   await screenshot(page, `${output}/desktop-menu.png`);
   await page.locator('[data-mode="practice"]').click(); await page.locator('#play').click();
   await until(page, () => window.__rimrun.engine.checkTimer === 0);
@@ -48,7 +54,7 @@ try {
   await page.keyboard.down('KeyW'); await until(page, z => window.__rimrun.engine.human.pos.z < z - 0.25, initialZ); await page.keyboard.up('KeyW');
   // Use actual mouse input, waiting on the simulation's release meter.
   await page.mouse.down();
-  await until(page, () => window.__rimrun.engine.charge >= 0.68); await page.mouse.up();
+  await until(page, () => window.__rimrun.engine.charge >= 0.585); await page.mouse.up();
   await until(page, () => window.__rimrun.engine.stats.made === 1);
   assert.equal(await page.evaluate(() => window.__rimrun.engine.stats.attempts), 1);
   // The shot card reports the release, the arc and what the ball actually did.
@@ -85,10 +91,14 @@ try {
   await page.keyboard.press('KeyM'); await page.locator('#leave-game').click();
   await page.locator('[data-mode="contest"]').click(); await page.locator('#play').click();
   await until(page, () => window.__rimrun.engine.checkTimer === 0);
-  await page.mouse.down(); await until(page, () => window.__rimrun.engine.charge >= 0.68); await page.mouse.up();
+  await page.mouse.down(); await until(page, () => window.__rimrun.engine.charge >= 0.585); await page.mouse.up();
   await until(page, () => window.__rimrun.engine.contestShots === 1);
   assert.equal(await page.evaluate(() => window.__rimrun.engine.score[0]), 1); assert(await page.locator('#rack-progress').isVisible());
   await screenshot(page, `${output}/three-point-contest.png`);
+  // Graphics can be dropped to the single forward pass and restored.
+  await page.evaluate(() => { const g = window.__rimrun; g.settings.graphics = 'standard'; g.pipeline.setQuality(false); });
+  await frames(page, 3); assert.equal(await page.evaluate(() => window.__rimrun.pipeline.mirror.visible), false);
+  await page.evaluate(() => { const g = window.__rimrun; g.settings.graphics = 'auto'; g.pipeline.setQuality(true); });
   console.log('Desktop: menu, movement, timed release, shot report, pump fake, six handles, camera switch, pause/resume, 2v2 pass and contest shot passed.');
   await page.keyboard.press('KeyM'); await page.locator('#leave-game').click();
   await page.locator('[data-mode="2v2"]').click(); await page.locator('#watch-demo').click();

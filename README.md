@@ -75,7 +75,8 @@ Use controller straps and a clear boundary. You can stay physically in one place
 
 **Shooting.** The ball is a size 7 with real mass, air drag, backspin and Magnus lift, thrown at a regulation 457 mm ring and a glass board. Every shot is solved through that same flight model, then *your* errors are applied to the launch itself: speed and heading, not a target offset. That is why the same lapse that still drops from the elbow comes up short from the arc.
 
-- Hold to gather: the athlete dips, loads the legs, brings the ball up the body to a set point above the shooting eye, and rises. Release at the top of the jump. The meter beside the reticle is the motion, not a separate mini-game.
+- The jump shot is modeled on Klay Thompson’s form as coaches describe it (sources and limits in [REFERENCE_NOTES.md](REFERENCE_NOTES.md)): a small hop into a wide, parallel base with the shooting shoulder a touch ahead; the ball straight into the pocket at the shooting hip and straight up to a set point over the shooting eye, elbow in, **before the feet leave the floor**; a modest jump straight up and down; the push starting just after take-off and the ball gone at the top; the guide hand off early; the elbow locked out above the head with a loose wrist and held. It is quick: 0.62 s from gather to release, inside the 0.79 s catch-and-shoot window tracking data credits him with, on an arc that enters the rim at about 46°. No name or likeness is used in the game.
+- Hold to gather and release at the top of the jump. The meter beside the reticle is the motion, not a separate mini-game.
 - Early leaves the legs out of it (short); late pushes it long. The window is full size at the rim and the elbow and tightens with range.
 - A hand in your face, drifting feet and tired legs scatter the shot. A fadeaway is harder to contest but less accurate; straight off a catch you are in rhythm and the window is wider.
 - Backspin matters after the release: it checks the ball on the rim, drags a bank shot down off the glass, and decides the bounces.
@@ -96,12 +97,17 @@ Use controller straps and a clear boundary. You can stay physically in one place
 
 ## Presentation
 
+- **Rendering.** On a desktop GPU the varnished hardwood mirrors the live scene (players, ball, LED boards), the frame is rendered in HDR with multisampling, and real light sources bloom. Lighting and reflections come from a CC0 HDRI of a hall with banks of overhead spotlights. *Settings → Graphics* switches between this and a single forward pass; **Auto** drops to Standard by itself if the machine cannot hold about 40 frames a second. Touch devices and headsets always use the forward pass, lighter spectators and no haze.
+- **Crowd.** About 1,400 spectators, each a real figure built from the athlete model: seated, individually dressed (shirts, sleeves, trousers or shorts, caps, shoes), different builds, skin and hair, children among them. They shift in their seats, and get to their feet with their arms up in proportion to the play: a few for a bucket, most of the building for a dunk. Fans sit courtside round the floor; reserves in warm-ups fill both benches beside a scorer’s table.
+- **Arena.** Scrolling LED ribbon boards on two levels, a band of lit suites with guests at the rail, acoustic panelling, a lighting truss of spot fixtures with faint shafts in the haze, catwalks, line-array speakers, padded broadcast stanchions, banners, and a centre-hung scoreboard whose four video screens carry a **live telephoto feed** of the game above the score.
+- **Floor.** Plank relief, grain and gloss variation from a CC0 scanned wood floor under a clear coat. Reflections sharpen at grazing angles and ripple with the planks.
+- **Athletes.** Skin with mottling, fine grain, flush at the knees, elbows, knuckles, ears and nose, and patches of sweat sheen that move with the body. Knit relief on jerseys and shorts, trimmed hems and side stripes, striped crew socks, shoes with a team toe cap and heel. Each player wears their own kit: compression arm or leg sleeve, headband, wristbands, shoe colour, and a fade haircut.
+- **Ball.** Eight panels, recessed channels and a pebbled grain that catches the lights; it turns with the simulated spin.
 - First person, or a broadcast camera over the ball-hand shoulder (**V**). Watch Gameplay uses a low sideline camera that travels with the play.
 - First-person desktop and touch use the athlete’s skinned arms; the shooting hand carries the ball a little wider there so it frames the rim instead of hiding it. Quest uses the tracked controller hands.
-- Athletes: shooting form with a held follow-through, one-hand finishes, two-foot stepback hop, staggered between-the-legs stance, arm bar, active defensive hands, steal lunges, block reaches, chest/bounce/lob pass releases, catches, stumbles and celebrations, all eased in body space over the retargeted clips with planted-foot IK.
+- Motion: shooting form with a held follow-through, one-hand finishes, two-foot stepback hop, staggered between-the-legs stance, arm bar, active defensive hands, steal lunges, block reaches, chest/bounce/lob pass releases, catches, stumbles and celebrations, all eased in body space over the retargeted clips with planted-foot IK.
 - The supplied **Mixamo `Dribble _2_.fbx`** is retargeted onto the 17-bone athlete rig and supplies the dribbling weight shift; inverse kinematics fits the hand to the live ball. Walking, running and defense blend from Crease VR’s retargeted Quaternius clips.
-- Human-proportioned, smooth-skinned athletes, full anatomical hands/fingers, faces, modeled hair and footwear, sleeveless jerseys and shorts. Approximately **56k triangles** close up; a separate **9k** distant mesh is included.
-- The Fieldhouse indoor arena: hardwood, both baskets, tiered seating, roof trusses, hanging banners, LED ribbons, a four-face jumbotron, a courtside scoreboard and a live shot clock above the glass. The crowd rises on big plays. The net is pushed open by the ball where it actually is, then whips back.
+- Athletes are about **56k triangles** close up with a separate **9k** distant mesh; spectators are about 1,060 triangles in the lower rows and 330 beyond.
 - Sound is synthesized: a steel rim, glass, a different net for a swish than for a ball that rattled in, sneaker chirps on hard cuts, shot-clock ticks, and a crowd murmur that swells after a make, a block or a broken ankle. Haptics follow the same events in the headset.
 - Five heat points trigger a 14-second hot streak with a wider release window. Perfect makes build heat faster.
 
@@ -129,16 +135,25 @@ The outdoor baseline was recorded from `fef750d` before the arena, anatomy, move
 | `src/input/` | Keyboard/touch/XR input, real-time reference-space motion history and gesture recognition. |
 | `src/render/athletes.js` | Basketball poses: posture, per-arm jobs eased over the clips, hand/foot IK. |
 | `src/render/humanoid.js`, `clips.js`, `footwork.js` | Athlete skinning, LODs, IK, animation playback and planted-foot stepping. |
-| `src/render/arena.js`, `effects.js` | Indoor venue, lighting, reactive crowd, net, shot clock, scoreboards, ball spin and trails. |
+| `src/render/arena.js`, `arena-detail.js`, `effects.js` | Indoor venue, floor material, LED boards, courtside, suites, rigging, stanchions, net, shot clock, scoreboards, ball spin and trails. |
+| `src/render/crowd.js` | Instanced spectators: clothing, builds, idle motion and the seated-to-standing blend. |
+| `src/render/pipeline.js` | Floor reflection, HDR and bloom, the jumbotron feed, and loading of the CC0 textures and HDRI. |
 | `src/audio.js` | Synthesized court sounds and crowd. |
 | `src/game/demo.js` | Contest demo commands; spectator pickup uses normal match AI. |
 | `src/xr/` | Session lifecycle, comfort preferences, world-space menu and headset HUD. |
 | `src/ui.js`, `src/style.css` | Desktop menu, HUD, release meter, shot report, results and help. |
 | `tools/review_motion.mjs` | Renders contact sheets of the live rig for reviewing poses and motion. |
+| `tools/build_crowd.mjs` | Builds the spectator model (`crowd.json` / `crowd.bin`) from the athlete. |
 
 ## Rebuilding character assets
 
-Runtime models are committed; Blender is unnecessary to play or build the game. For anatomy changes, install Blender 4.3+ and run:
+Runtime models are committed; Blender is unnecessary to play or build the game. The spectators are derived from the committed athlete and rebuild without Blender:
+
+```sh
+npm run build:crowd
+```
+
+For anatomy changes, install Blender 4.3+ (or `pip install bpy` and run the script with Python; verified with bpy 5.3) and run:
 
 ```sh
 python3 tools/fetch_anatomy.py
@@ -163,4 +178,4 @@ The GitHub Actions workflow tests, builds and deploys the default branch to GitH
 
 **One-time Pages setup:** open [repository Settings → Pages](https://github.com/Ali-sial-786/BasketballVR/settings/pages), set **Build and deployment → Source → GitHub Actions**, then run **Test, build and deploy RIMRUN** from the Actions tab. The GitHub connection used to build this game can push source but cannot enable Pages (GitHub returns HTTP 403 for that administrative action). Until enabled, CI still passes and publishes a downloadable `rimrun-static-site` build artifact. Once configured, the game will be at `https://ali-sial-786.github.io/BasketballVR/`.
 
-Automated tests cover the ball physics, shot model, rules, complete AI games, athlete assets and the key poses, and Chromium checks cover desktop and touch controls. Balance was tuned against seeded AI-versus-AI games and a scripted player with human-like timing and reaction lag, not against people. Physical Quest rendering, controller ergonomics, comfort, sustained headset frame rate, and how the physical shot and pass gestures feel in the hand require hardware testing. This is a playable first version for iteration, with human-like models rather than a photorealistic NBA production asset set.
+Automated tests cover the ball physics, shot model, rules, complete AI games, athlete assets and the key poses, and Chromium checks cover desktop and touch controls. Balance was tuned against seeded AI-versus-AI games and a scripted player with human-like timing and reaction lag, not against people. Physical Quest rendering, controller ergonomics, comfort, sustained headset frame rate, and how the physical shot and pass gestures feel in the hand require hardware testing. The rich desktop pipeline was checked for correctness in software-rendered Chromium, not timed on real GPUs; frame-rate behaviour on integrated graphics is what the Auto setting is there for. The shot form follows written breakdowns of Klay Thompson’s mechanics; the reference videos were located but could not be played from the build environment. This is a playable first version for iteration, with human-like models rather than a photorealistic NBA production asset set.

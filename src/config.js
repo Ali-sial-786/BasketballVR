@@ -12,7 +12,9 @@ export const CONFIG = {
   player: { speed: 3.5, sprint: 5.0, radius: 0.34, jumpSpeed: 3.8, shotJump: 3.0, rimJump: 4.25, staminaRegen: 14,
     heights: [1.92, 1.96, 1.94, 1.88], ballTax: 0.93 },
   match: { target: 11, cap: 21, shotClock: 18, offensiveReboundClock: 12 },
-  shot: { idealTime: 0.72, greenWindow: 0.075, maxCharge: 1.35, takeoff: 0.44, pumpWindow: 0.2 },
+  // A quick, compact catch-and-shoot release: into the pocket, set point before
+  // the feet leave the floor, ball gone at the top of a modest jump.
+  shot: { idealTime: 0.62, greenWindow: 0.075, maxCharge: 1.2, takeoff: 0.36, pumpWindow: 0.18, followThrough: 1.0 },
   pass: { chest: 12.5, bounce: 10.5, lobApex: 3.7 },
   contest: { seconds: 70, ballsPerRack: 5, moneyRack: 2 },
   xr: { maxFrameRate: 90, foveation: 1, framebufferScale: 1 },
