@@ -228,37 +228,46 @@ export function shotElevation(distance, rise) {
 // in launch speed and heading, so the same lapse costs more from deep than at
 // the elbow, and the ball then has to beat the real rim.
 export function makeShot({ from, feet, aim, charge = CONFIG.shot.idealTime, physicalVelocity = null, contest = 0, difficulty = 'park', heat = false,
-  rng = Math.random, dunk = false, layup = false, floater = false, fade = false, moving = 0, fatigue = 0, rhythm = false, wobble = 0 }) {
+  rng = Math.random, dunk = false, layup = false, floater = false, fade = false, moving = 0, fatigue = 0, rhythm = false, wobble = 0, touch = 1 }) {
   const h = CONFIG.hoop, d = DIFFICULTIES[difficulty];
   const dist = Math.hypot(from.x - h.x, from.z - h.z);
   const to = new Vec3(h.x - from.x, 0, h.z - from.z).normalize();
   const facing = new Vec3(aim.x, 0, aim.z).normalize();
   const hoopAzimuth = Math.atan2(to.x, to.z), aimAzimuth = Math.atan2(facing.x, facing.z);
   const aimError = Math.atan2(Math.sin(aimAzimuth - hoopAzimuth), Math.cos(aimAzimuth - hoopAzimuth));
-  const angle = Math.abs(aimError), assisted = angle <= d.aimCone;
+  const angle = Math.abs(aimError);
+  let assisted = angle <= d.aimCone;
   let q = releaseQuality(charge, difficulty, heat, rhythm, layup || floater || dunk ? 0 : dist);
   let elevation = layup ? 1.08 : floater ? 1.04 : shotElevation(dist, h.y - from.y);
-  let handSpeed = 0, handHeading = 0;
+  let handSpeed = 0, handHeading = 0, power = 1, handPower = 1, literal = false;
   if (physicalVelocity) {
-    // Comfortable seated/standing shots need only a small real flick. Real hand
-    // speed is measured in reference space, never from artificial locomotion.
-    const up = physicalVelocity.y, forward = physicalVelocity.x * to.x + physicalVelocity.z * to.z;
-    const form = clamp((up + Math.max(0, forward) * 0.5) / 2.1, 0, 1);
-    q = { quality: form, green: form >= 0.92, offset: 0, timing: form >= 0.92 ? 'PERFECT' : form < 0.45 ? 'SOFT' : 'GOOD' };
-    // The ball leaves along the hand's own arc and line. Assistance relaxes
-    // both toward the solved shot instead of replacing them.
-    const horizontal = Math.hypot(physicalVelocity.x, physicalVelocity.z);
-    const speed = Math.hypot(horizontal, up), reference = 2 + 0.1 * dist, power = speed / reference;
-    if (speed > 0.9 && up > 0.2) {
-      const handElevation = clamp(Math.atan2(up, Math.max(horizontal, 0.05)), 0.72, 1.12);
-      if (!layup) elevation += (handElevation - elevation) * (1 - d.assist * 0.6);
-      if (horizontal > 0.4) {
-        const heading = Math.atan2(physicalVelocity.x, physicalVelocity.z);
-        handHeading = clamp(Math.atan2(Math.sin(heading - hoopAzimuth), Math.cos(heading - hoopAzimuth)), -0.6, 0.6) * (1 - d.assist) * 0.22;
-      }
-    }
-    if (power < 0.75) handSpeed = -(0.75 - power) * (1 - d.assist * 0.6) * 0.3;
-    else if (power > 2) handSpeed = Math.min(0.08, (power - 2) * (1 - d.assist * 0.6) * 0.12);
+    // A real throw. The ball leaves along the hand's own arc and line with the
+    // hand's own power; assistance (by level) narrows the error rather than
+    // replacing the throw. Hand speeds in a headset are lower than a real
+    // shot's ball speed, so power is measured against a natural flick for
+    // this distance.
+    const v = physicalVelocity, up = v.y, horizontal = Math.hypot(v.x, v.z), speed = Math.hypot(horizontal, up);
+    // `touch` is this shooter's own natural flick, learned from their shots,
+    // so what counts is a consistent motion, as it is with a real ball.
+    const reference = layup || floater ? 1.9 + 0.1 * dist : 2.6 + 0.15 * dist;
+    handPower = speed / reference; power = handPower / touch;
+    const handElevation = Math.atan2(up, Math.max(horizontal, 0.05));
+    const heading = horizontal > 0.25 ? Math.atan2(Math.sin(Math.atan2(v.x, v.z) - hoopAzimuth), Math.cos(Math.atan2(v.x, v.z) - hoopAzimuth)) : 0;
+    // Thrown well away from the rim is a throw, not a shot.
+    literal = Math.abs(heading) > 0.9 || handElevation < 0.05;
+    assisted = !literal;
+    const assist = d.assist;
+    if (!layup && !floater && !dunk) elevation = clamp(handElevation, 0.5, 1.28) + (elevation - clamp(handElevation, 0.5, 1.28)) * assist * 0.65;
+    handHeading = clamp(heading, -0.5, 0.5) * Math.pow(1 - assist, 1.5) * 0.6;
+    // Speed: a perfect flick is exact; soft falls short and hard flies long,
+    // forgiven more on easier levels. A token flick dies well short.
+    // (A make from the arc needs the ball's speed within about 1%: on Park a
+    // flick within 15-20% of natural is enough; on All-star nearer 10%.)
+    const slope = 0.14 * (1 - assist * 0.95);
+    handSpeed = power >= 0.6 ? (power - 1) * slope : (0.6 - 1) * slope - (0.6 - power) * 1.25;
+    handSpeed = clamp(handSpeed, -0.85, 0.2);
+    const form = clamp(1 - Math.abs(power - 1) * (0.9 + (1 - assist) * 1.6) - Math.abs(heading) * 0.8, 0, 1);
+    q = { quality: form, green: form >= 0.86, offset: 0, timing: form >= 0.86 ? 'PERFECT' : power < 1 ? 'SOFT' : 'STRONG' };
   }
   const close = dunk || layup || floater || !!physicalVelocity;
   const movementPenalty = close ? 0 : clamp((moving - 0.8) / 4, 0, 1) * (fade ? 0.13 : 0.2);
@@ -266,21 +275,26 @@ export function makeShot({ from, feet, aim, charge = CONFIG.shot.idealTime, phys
   const scale = 1.15 - d.assist * 0.5;
   const quality = clamp(q.quality - contest * 0.5 - movementPenalty - fatiguePenalty - wobble * (layup || floater ? 0.5 : 1), 0, 1);
   // Timing pulls the shot short or long; pressure, drift and tired legs scatter it.
-  const timingError = (1 - q.quality) * scale * (physicalVelocity ? 0.6 : 1), scatter = (q.quality - quality) * scale, error = timingError + scatter;
+  // A real throw's power and line are already in the launch; only pressure scatters it.
+  const timingError = physicalVelocity ? 0 : (1 - q.quality) * scale, scatter = (q.quality - quality) * scale, error = timingError + scatter;
   const triangle = () => rng() + rng() - 1;
   const short = q.timing === 'EARLY' || q.timing === 'SOFT';
   const speedError = (short ? -1 : 1) * timingError * 0.044 + triangle() * (timingError * 0.04 + scatter * 0.15) + handSpeed;
   const headingError = triangle() * (timingError * 0.06 + scatter * 0.2) + aimError * (1 - d.assist) * 0.12 + handHeading;
   const right = new Vec3(-to.z, 0, to.x);
   // Around the basket a bump or a hand in the way moves the touch, not the power.
-  const touch = layup || floater ? scatter : 0;
-  const target = new Vec3(h.x, h.y, h.z).addScaled(right, triangle() * (error * 0.07 + touch * 0.45)).addScaled(to, triangle() * (error * 0.05 + touch * 0.35));
-  if (!assisted) {
+  const finish = layup || floater ? scatter : 0;
+  const target = new Vec3(h.x, h.y, h.z).addScaled(right, triangle() * (error * 0.07 + finish * 0.45)).addScaled(to, triangle() * (error * 0.05 + finish * 0.35));
+  if (!assisted && !physicalVelocity) {
     target.x = from.x + facing.x * Math.max(2, dist);
     target.z = from.z + facing.z * Math.max(2, dist);
   }
   let vel, spin, bank = false, arc = 0;
-  if (dunk && from.y > h.y) {
+  if (literal) {
+    // Not at the rim: the ball goes exactly where it was thrown, a little
+    // livelier than the hand (a ball is light).
+    vel = new Vec3(physicalVelocity.x, physicalVelocity.y, physicalVelocity.z).scale(1.7); spin = new Vec3();
+  } else if (dunk && from.y > h.y) {
     // Drive the ball down from the actual hand. The same rim and downward
     // crossing test decide whether it goes through.
     const down = 2.6;
@@ -306,7 +320,7 @@ export function makeShot({ from, feet, aim, charge = CONFIG.shot.idealTime, phys
   const kind = dunk ? 'dunk' : layup ? 'layup' : floater ? 'floater' : fade ? 'fadeaway' : 'jumper';
   return { vel, spin, quality, green: q.green && contest < 0.35 && assisted && movementPenalty < 0.08 && fatiguePenalty < 0.05,
     timing: q.timing, offset: q.offset, contest, value: dunk || layup || floater ? 2 : isThree(feet) ? 3 : 2, distance: dist,
-    assisted, dunk, layup, floater, fade, bank, rhythm, moving, kind, arc: arc * 180 / Math.PI };
+    assisted, dunk, layup, floater, fade, bank, rhythm, moving, kind, arc: arc * 180 / Math.PI, power, handPower: physicalVelocity && !literal ? handPower : null };
 }
 
 // ------------------------------------------------------------------------ passes

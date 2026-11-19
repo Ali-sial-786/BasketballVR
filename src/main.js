@@ -61,6 +61,26 @@ async function init() {
   const comfortMat = new THREE.MeshBasicMaterial({ color: 0x102b2b, side: THREE.BackSide, transparent: true, opacity: 0, depthTest: false });
   const comfort = new THREE.Mesh(new THREE.SphereGeometry(0.09, 16, 8), comfortMat); comfort.renderOrder = 1000; comfort.visible = false; scene.add(comfort);
 
+  // Simulation state from one step back, for drawing between steps.
+  const before = new WeakMap(), ballBefore = new THREE.Vector3(); let ballKnown = false;
+  function remember() {
+    for (const p of engine.players) { const b = before.get(p) || {}; b.x = p.pos.x; b.z = p.pos.z; b.jump = p.jump; before.set(p, b); }
+    ballBefore.copy(engine.ball.pos); ballKnown = true;
+  }
+  function interpolate(alpha) {
+    const saved = [];
+    for (const p of engine.players) {
+      const b = before.get(p);
+      if (!b || Math.hypot(p.pos.x - b.x, p.pos.z - b.z) > 0.5) continue;
+      saved.push([p, p.pos.x, p.pos.z, p.jump]);
+      p.pos.x = b.x + (p.pos.x - b.x) * alpha; p.pos.z = b.z + (p.pos.z - b.z) * alpha; p.jump = b.jump + (p.jump - b.jump) * alpha;
+    }
+    // (A ball in your real hand is already where your hand is.)
+    const ball = engine.ball.pos, held = input.xr && engine.ownerId === 0 && engine.ballState === 'held';
+    const ballSaved = !held && ballKnown && ball.distanceTo(ballBefore) < 1 ? ball.clone() : null;
+    if (ballSaved) ball.lerpVectors(ballBefore, ballSaved, alpha);
+    return () => { for (const [p, x, z, jump] of saved) { p.pos.x = x; p.pos.z = z; p.jump = jump; } if (ballSaved) ball.copy(ballSaved); };
+  }
   function setupPlayers() {
     for (const p of players) p.dispose(scene);
     // Athletes share mesh geometry; each owns its skeleton and kit material.
@@ -174,7 +194,8 @@ async function init() {
       // Room-scale head movement contributes to the real player position. Only
       // the rig offset is moved by the stick; the runtime owns the eye height.
       const rotated = new THREE.Vector3(input.headRef.p.x, 0, input.headRef.p.z).applyAxisAngle(new THREE.Vector3(0, 1, 0), rig.rotation.y);
-      rig.position.set(engine.human.pos.x - rotated.x, settings.locomotion === 'blink' ? 0 : engine.human.jump * 0.25, engine.human.pos.z - rotated.z);
+      // You go up with your jump: it is yours, started with a button.
+      rig.position.set(engine.human.pos.x - rotated.x, engine.human.jump * (settings.locomotion === 'blink' ? 0.4 : 1), engine.human.pos.z - rotated.z);
       input.refreshWorld();
     } else if (menu) {
       rig.position.set(0, 0, 0); rig.rotation.set(0, 0, 0);
@@ -241,6 +262,7 @@ async function init() {
         accumulator = Math.min(0.08, accumulator + dt);
         let first = true;
         while (accumulator >= CONFIG.fixedStep) {
+          remember();
           const command = { ...cmd };
           for (const key of discrete) delete command[key];
           if (first) Object.assign(command, pending);
@@ -257,7 +279,7 @@ async function init() {
           const strength = { shot: 0.25, bounce: 0.1, steal: 0.5, poke: 0.4, block: 0.7, catch: 0.3, move: 0.18, score: 0.6, bump: 0.35, land: 0.12, pump: 0.15 }[event.type];
           if (strength) {
             const personal = (event.player ?? event.owner) === 0 || event.type === 'score' && event.team === 0;
-            if (input.xr && personal) input[input.physicalGather || settings.dominant].pulse(strength, event.type === 'score' ? 90 : 25);
+            if (input.xr && personal) input[settings.dominant].pulse(strength, event.type === 'score' ? 90 : 25);
           }
           if (event.type === 'finish') {
             if (demo) { demoRestart = 3; continue; }
@@ -267,12 +289,16 @@ async function init() {
           }
         }
       }
+      // Draw between the last two simulation steps: the headset refreshes at
+      // 72-120 Hz and the simulation runs at 120, so without this the court
+      // judders by a step every few frames.
+      const restore = interpolate(engine.phase === 'playing' ? accumulator / CONFIG.fixedStep : 1);
       if (menu && engine.phase === 'result') { engine.start('2v2'); engine.preview = true; }
       if (demo && engine.phase === 'result') { demoRestart -= dt; if (demoRestart <= 0) startDemo(engine.mode); }
       updateCamera(dt, now);
       if (input.xr && engine.ownerId === 0 && engine.ballState === 'held') {
-        const c = input[input.physicalGather || settings.dominant];
-        if (c.tracked) { engine.hand = c.gripPose.p.clone().add(new Vec3(0, 0.03, -0.06).applyQuat(c.gripPose.q)); engine.updateOwnedBall(0); }
+        const c = input[settings.dominant];
+        if (c.tracked) { engine.hand = input.ballPoint(c); engine.updateOwnedBall(0); }
       }
       const viewer = input.xr ? input.head.p : camera.getWorldPosition(viewerPosition);
       for (const [i, view] of players.entries()) {
@@ -286,7 +312,7 @@ async function init() {
           squeaks.set(p.id, now); audio.play({ type: 'squeak', strength: Math.min(1, force / 22) });
         }
       }
-      hands.update(input, engine, !menu && !demo && engine.phase === 'playing'); effects.update(dt, engine); court.update(dt, engine, now);
+      hands.update(input, engine, !menu && !demo && engine.phase === 'playing', settings); effects.update(dt, engine); court.update(dt, engine, now);
       audio.update(engine, !menu || demo);
       xrUI.update(dt, now);
       uiTick += dt; if (uiTick > 0.05) { uiTick = 0; if (!menu) ui.update(now); }
@@ -303,6 +329,7 @@ async function init() {
       } else pace.last = performance.now();
       pipeline.feed(feedFocus.set(engine.ball.pos.x, Math.max(1.2, engine.ball.pos.y * 0.6 + 0.6), engine.ball.pos.z));
       pipeline.render(input.xr);
+      restore();
     } catch (error) { if (!errorShown) { errorShown = true; fail(error); renderer.setAnimationLoop(null); } }
   });
 }

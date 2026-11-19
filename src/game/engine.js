@@ -23,6 +23,7 @@ function athlete(id, team, name, x, z) {
 export class GameEngine {
   constructor({ rng = Math.random } = {}) {
     this.rng = rng; this.ball = new Basketball(); this.events = []; this.start('practice'); this.phase = 'menu';
+    this.touch = 1;   // the person's natural release speed, relative to the model's (learned)
   }
   emit(type, data = {}) { this.events.push({ type, time: this.time, ...data }); }
   drainEvents() { return this.events.splice(0); }
@@ -64,7 +65,7 @@ export class GameEngine {
   step(dt, cmd = {}) {
     if (this.phase !== 'playing') return;
     this.time += dt;
-    this.hand = cmd.hand || null; this.hands = cmd.hands || []; this.manualDribble = cmd.manualDribble || false;
+    this.hand = cmd.hand || null; this.hands = cmd.hands || []; this.manualDribble = cmd.manualDribble || false; this.handVel = cmd.handVel || null;
     this.dribbleImpulse = Math.max(this.dribbleImpulse * Math.exp(-dt * 4), cmd.bounceSpeed || 0);
     for (const p of this.players) {
       p.stamina = Math.min(100, p.stamina + CONFIG.player.staminaRegen * dt);
@@ -72,7 +73,7 @@ export class GameEngine {
       if (!p.actionTime) p.action = '';
       if (p.jump > 0 || p.jumpVel > 0) {
         p.jumpVel -= CONFIG.ball.gravity * dt; p.jump = Math.max(0, p.jump + p.jumpVel * dt);
-        if (!p.jump) { this.emit('land', { player: p.id, speed: -p.jumpVel }); p.jumpVel = 0; }
+        if (!p.jump) { this.emit('land', { player: p.id, speed: -p.jumpVel }); p.jumpVel = 0; p.leap = null; p.dunkJump = false; p.slam = false; }
       }
       if (this.ownerId === p.id) p.ownedFor += dt; else { p.ownedFor = 0; p.charge = 0; p.protect = Math.max(0, p.protect - dt * 6); }
     }
@@ -126,7 +127,9 @@ export class GameEngine {
     const m = new Vec3(cmd.move?.x || 0, 0, cmd.move?.z || 0);
     if (m.length() > 1) m.normalize();
     if (cmd.blinkStep && this.mode !== 'contest') { p.pos.addScaled(m, 1.1); m.set(0, 0, 0); }
-    const sprint = cmd.sprint && p.stamina > 15 && !p.defending;
+    // Boost works on both ends of the floor.
+    const sprint = cmd.sprint && p.stamina > 12;
+    p.boosting = sprint;
     let speed = sprint ? CONFIG.player.sprint : CONFIG.player.speed;
     if (m.lengthSq() > 0.01) {
       // Sliding and back-pedalling are slower than running where you look.
@@ -139,7 +142,7 @@ export class GameEngine {
       if (this.ballState === 'held') speed *= 0.36;
       const move = p.moveState;
       if (move?.kind === 'hesi' && move.age < move.duration * 0.6) speed *= 0.35;
-    } else if (p.defending) speed *= 0.8;
+    } else if (p.defending) speed *= sprint ? 0.92 : 0.86;
     if (p.burst > 0) speed *= 1.12;
     if (p.bump > 0) speed *= 0.6;
     if (this.mode === 'contest') speed = 0;
@@ -152,9 +155,10 @@ export class GameEngine {
         if (toward > 0) m.addScaled(lane, -toward * (1 - clamp((gap - 0.35) / 0.9, 0, 1)));
       }
     }
+    if (p.leap && p.jump > 0) m.copy(p.leap);
     movePlayer(p, m, dt);
-    if (sprint && p.locoVel.lengthSq() > 0.4) p.stamina = Math.max(0, p.stamina - 22 * dt);
-    if (cmd.jump) this.jump(p);
+    if (sprint && p.locoVel.lengthSq() > 0.4) p.stamina = Math.max(0, p.stamina - 15 * dt);
+    if (cmd.jump) this.jump(p, { boost: sprint });
     if (cmd.moveAction) this.dribbleMove(p, cmd.moveAction);
     if (cmd.steal) this.trySteal(p);
     if (cmd.pass) {
@@ -171,8 +175,22 @@ export class GameEngine {
     if (this.ballState === 'held') this.charge = Math.min(CONFIG.shot.maxCharge, this.charge + dt);
     const takeoff = CONFIG.shot.takeoff;
     if (cmd.autoJump && this.ballState === 'held' && this.charge >= takeoff && this.charge < takeoff + dt * 1.5) this.jump(p);
+    // A dunk: up over the ring with the ball, then down through it.
+    // In a headset you slam it with your own hand (or let go): early is fine,
+    // the slam lands as soon as the ball is over the ring. Without a tracked
+    // hand it goes down at the top of the jump.
+    if (this.ballState === 'held' && p.dunkJump) {
+      if (cmd.release || (this.handVel ? this.handVel.y < -1.0 && p.jump > 0.15 : p.jumpVel < 0.6)) p.slam = true;
+      if (p.slam && this.canFinishDunk(p)) { this.shoot(p, { aim: cmd.aim || new Vec3(0, 0, -1), forceDunk: true }); return; }
+      // Coming down without getting it over the ring: it goes up as a finish.
+      if (p.slam && p.jumpVel < -0.4 && p.jump < 0.75) { p.dunkJump = false; this.shoot(p, { aim: cmd.aim || new Vec3(0, 0, -1) }); return; }
+      if (cmd.release) return;
+    }
     if (cmd.release && this.ballState === 'held') {
-      if (cmd.release.kind === 'bounce') {
+      if (cmd.release.kind === 'cancel') {
+        // Let go without a throw: nothing leaves the hand.
+        this.ballState = 'dribble'; this.charge = 0; p.gatherFrom = null; this.emit('cancel', { player: 0 });
+      } else if (cmd.release.kind === 'bounce') {
         this.ballState = 'dribble'; this.charge = 0; this.dribbleImpulse = 2; this.emit('bounce', { speed: 4, owner: 0 });
       } else if (cmd.release.kind === 'pass' && this.mode === '2v2') this.pass(p, null, cmd.release.passKind || 'auto');
       else if (!cmd.release.velocity && this.charge < CONFIG.shot.pumpWindow && this.mode !== 'contest') this.pumpFake(p);
@@ -262,7 +280,16 @@ export class GameEngine {
       const from = p.pos.clone().add(p.gatherFrom); from.y += p.jump;
       this.ball.pos.lerpVectors(from, this.ball.pos, t * t * (3 - 2 * t));
     }
-    if (human && this.hand && gathered) this.ball.pos.copy(this.hand);
+    if (human && this.hand && gathered) {
+      this.ball.pos.copy(this.hand);
+      if (p.dunkJump && p.jump > 0.05) {
+        // Reaching for the rim on a dunk: an arm raised over the head finds
+        // the ring (a real arm is longer than a controller says it is).
+        const raised = smoothstep(1.5, 2.0, this.hand.y - p.jump), toRim = new Vec3(hoop.x - this.ball.pos.x, 0, hoop.z - this.ball.pos.z), d = toRim.length();
+        if (d > 0.001) this.ball.pos.addScaled(toRim.scale(1 / d), Math.min(d, 0.5) * 0.85 * raised);
+        this.ball.pos.y += 0.24 * raised;
+      }
+    }
     else if (human && this.hand && !gathered) {
       // Stay below the actual hand; never draw a bouncing ball through the face.
       this.ball.pos.x = this.hand.x; this.ball.pos.z = this.hand.z;
@@ -285,7 +312,7 @@ export class GameEngine {
     this.ball.vel.set(0, 0, 0); this.ball.spin.set(0, 0, 0);
   }
 
-  shoot(p, { aim = null, physicalVelocity = null, from = null, aiCharge = null } = {}) {
+  shoot(p, { aim = null, physicalVelocity = null, from = null, aiCharge = null, forceDunk = false } = {}) {
     if (this.ownerId !== p.id || this.shot) return false;
     if (this.needsClear) { if (p.id === 0) this.toast('CLEAR IT FIRST.', 'Take the ball beyond the three-point line.'); this.ballState = 'dribble'; this.charge = 0; return false; }
     const hoop = CONFIG.hoop, human = p.id === 0 && !this.preview;
@@ -294,7 +321,7 @@ export class GameEngine {
     if (!from && this.ballState !== 'held' && p.action !== 'shooting') origin.y = Math.max(origin.y, 1.95 + p.jump);
     const gap = distance(p.pos, hoop), speed = p.locoVel.length();
     const lane = new Vec3(hoop.x - p.pos.x, 0, hoop.z - p.pos.z).normalize(), toward = p.locoVel.dot(lane);
-    const dunk = gap < 1.1 && distance(origin, hoop) < 0.18 && origin.y > hoop.y + 0.08;
+    const dunk = forceDunk && origin.y > hoop.y || gap < 1.1 && distance(origin, hoop) < 0.18 && origin.y > hoop.y + 0.08;
     const layup = !dunk && gap < 2.9 && (p.jump > 0.08 || speed > 1.2);
     const floater = !dunk && !layup && gap < 4.7 && toward > 2.1;
     const fade = !dunk && !layup && !floater && toward < -1;
@@ -303,7 +330,7 @@ export class GameEngine {
     const contest = this.contestOn(p) * (fade ? 0.8 : 1);
     const shot = makeShot({ from: origin, feet: p.pos, aim, charge: aiCharge ?? this.charge,
       physicalVelocity, contest, difficulty: p.id === 0 ? this.difficulty : 'park', heat: p.team === 0 && this.heatTime > 0, rng: this.rng,
-      dunk, layup, floater, fade, moving: speed, fatigue: clamp((30 - p.stamina) / 30, 0, 1), rhythm,
+      dunk, layup, floater, fade, moving: speed, fatigue: clamp((30 - p.stamina) / 30, 0, 1), rhythm, touch: human ? this.touch : 1,
       // An AI shooter's touch: steadier hands at higher levels.
       wobble: human ? 0 : 0.05 + (1 - DIFFICULTIES[this.difficulty].aiAccuracy) * 0.45 });
     this.shot = { ...shot, shooter: p.id, team: p.team, released: this.time, origin: origin.clone(), resolved: false, reported: false,
@@ -311,6 +338,8 @@ export class GameEngine {
       assist: this.lastPass && this.lastPass.to === p.id && this.time - this.lastPass.time < 4 ? this.lastPass.from : null,
       rack: this.rack, rackBall: this.rackBall, money: this.rack === CONFIG.contest.moneyRack || this.rackBall === 4 };
     this.lastShot = this.shot;
+    // Learn the shooter's natural release from each real throw, slowly.
+    if (human && shot.handPower) this.touch = clamp(this.touch + (shot.handPower - this.touch) * 0.25, 0.6, 2.4);
     this.ball.launch(origin, shot.vel, shot.spin); this.ownerId = null; this.ballState = 'flight'; this.flightAge = 0; this.liveRebound = true;
     this.lastTouch = p.id; this.charge = 0; this.passInfo = null; this.catchFrom = null;
     p.action = dunk ? 'dunk' : layup || floater ? 'layup' : 'follow'; p.actionTime = dunk || layup || floater ? 0.8 : CONFIG.shot.followThrough; p.charge = 0; p.moveState = null; p.pump = 0;
@@ -540,12 +569,40 @@ export class GameEngine {
       this.turnover();
     }
   }
-  jump(p) {
+  // Is the way to the rim clear? Nobody standing in the lane between the
+  // player and the basket, close enough to meet them in the air.
+  laneClear(p) {
+    const hoop = CONFIG.hoop;
+    return !this.players.some(d => d.team !== p.team && !d.stagger && segmentGap(d.pos, p.pos, hoop) < 0.45
+      && (d.pos.x - p.pos.x) * (hoop.x - p.pos.x) + (d.pos.z - p.pos.z) * (hoop.z - p.pos.z) > 0 && distance(d.pos, hoop) < distance(p.pos, hoop) + 0.2);
+  }
+  // A dunk can be finished once the ball is over the ring.
+  canFinishDunk(p) {
+    const hoop = CONFIG.hoop, ball = this.ball.pos;
+    return ball.y > hoop.y + 0.02 && distance(ball, hoop) < 0.34 && distance(p.pos, hoop) < 1.3;
+  }
+  jump(p, { boost = false } = {}) {
     if (p.jump > 0 || p.jumpVel > 0 || p.stamina < 8) return;
     const gathered = this.ownerId === p.id && (this.ballState === 'held' || p.action === 'shooting');
-    const gap = distance(p.pos, CONFIG.hoop), P = CONFIG.player;
+    const hoop = CONFIG.hoop, gap = distance(p.pos, hoop), P = CONFIG.player;
+    const toward = new Vec3(hoop.x - p.pos.x, 0, hoop.z - p.pos.z).normalize();
+    const facing = toward.x * Math.sin(p.yaw) + toward.z * Math.cos(p.yaw);
+    p.leap = null; p.dunkJump = false; p.slam = false;
+    // Boost + jump with the ball, close to the rim, facing it, with a clear
+    // lane: a dunk. The take-off carries the player in under the ring.
+    if (this.ownerId === p.id && boost && gap < 2.9 && gap > 0.25 && facing > 0.5 && this.laneClear(p)) {
+      p.dunkJump = true; p.jumpVel = P.dunkJump;
+      const flight = P.dunkJump / CONFIG.ball.gravity;
+      p.leap = toward.scale(clamp((gap - 0.55) / flight, 0, 5.2));
+      if (this.ballState !== 'held') { this.beginGather(p); this.ballState = 'held'; this.charge = CONFIG.shot.takeoff; }
+      p.stamina = Math.max(0, p.stamina - 14);
+      p.action = 'shooting'; p.actionTime = 1.2;
+      this.emit('jump', { player: p.id, dunk: true });
+      return;
+    }
     // A jump shot rises about 40 cm. Finishes and blocks use the whole vertical.
     p.jumpVel = !gathered ? P.jumpSpeed : gap < 0.95 ? P.rimJump : gap < 2.9 ? 3.6 : P.shotJump;
+    if (gathered && gap < 2.9 && facing > 0.3) p.leap = toward.scale(clamp(p.locoVel.length(), 0, 2.4));
     p.stamina = Math.max(0, p.stamina - (gathered && gap >= 2.9 ? 6 : 12));
     if (p.action !== 'shooting') { p.action = 'jump'; p.actionTime = 0.7; }
     this.emit('jump', { player: p.id });

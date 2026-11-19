@@ -10,8 +10,14 @@ export class XRUI {
     this.panel.renderOrder = 100; scene.add(this.panel); this.panel.visible = false;
     this.hudCanvas = document.createElement('canvas'); this.hudCanvas.width = 1024; this.hudCanvas.height = 320;
     this.hudTexture = new THREE.CanvasTexture(this.hudCanvas); this.hudTexture.colorSpace = THREE.SRGBColorSpace;
-    this.hud = new THREE.Mesh(new THREE.PlaneGeometry(0.85, 0.266), new THREE.MeshBasicMaterial({ map: this.hudTexture, transparent: true, depthTest: false }));
+    // The score and clock live on your off-hand wrist: raise it to read them.
+    this.hud = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.0625), new THREE.MeshBasicMaterial({ map: this.hudTexture, transparent: true, depthTest: false }));
     this.hud.renderOrder = 90; scene.add(this.hud); this.hud.visible = false;
+    // Calls ("BUCKET.", "SHOT CLOCK.") float briefly low in front of you, then go.
+    this.callCanvas = document.createElement('canvas'); this.callCanvas.width = 1024; this.callCanvas.height = 160;
+    this.callTexture = new THREE.CanvasTexture(this.callCanvas); this.callTexture.colorSpace = THREE.SRGBColorSpace;
+    this.call = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.14), new THREE.MeshBasicMaterial({ map: this.callTexture, transparent: true, depthTest: false, opacity: 0 }));
+    this.call.renderOrder = 91; scene.add(this.call); this.call.visible = false; this.callShown = '';
     this.ray = new THREE.Raycaster(); this.ray.far = 5;
     this.rays = [input.left, input.right].map(() => {
       const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -2)]), new THREE.LineBasicMaterial({ color: 0xf5d8ac, transparent: true, opacity: 0.65, depthTest: false }));
@@ -39,7 +45,7 @@ export class XRUI {
     this.button(60, 710, 425, 68, `MOVE: ${this.settings.locomotion.toUpperCase()}`, () => { this.settings.locomotion = this.settings.locomotion === 'smooth' ? 'blink' : 'smooth'; this.hooks.settings(); this.drawMenu(); });
     this.button(515, 710, 425, 68, `TURN: ${this.settings.turn.toUpperCase()}`, () => { const turns = ['snap', 'smooth', 'off']; this.settings.turn = turns[(turns.indexOf(this.settings.turn) + 1) % 3]; this.hooks.settings(); this.drawMenu(); });
     c.fillStyle = '#d2d9c2'; c.font = '23px Arial';
-    ['Grip, lift & flick to shoot: the ball follows your hand. Or hold trigger, release in the green.', 'Ball hand A / B: cross / wrap. With left stick click: legs / hesitation. Right stick up / down: spin / back.', 'Off-hand trigger: pass. Throw flat for a chest pass, down and out for a bounce pass.', 'Off-hand grip: stance. Ball-hand trigger: steal. Off-hand A: jump. Get a real hand on a shot to block it.', 'Use straps. Clear your play space. Let the stick do the running.'].forEach((s, i) => c.fillText(s, 65, 829 + i * 39, 865));
+    ['Ball-hand trigger: hold the ball. Shoot with a real throw and let go; no throw, no shot.', 'A: jump (jump shot, block). Off-hand trigger: boost. Boost + A near the rim: dunk, then slam it down.', 'Grip: dribble move. Your motion picks it: across = cross, low = legs, behind = wrap, turn = spin, pull back = stepback.', 'Defence: hold grip for a stance, trigger or a real swipe to steal, A to jump and get a hand on it. X: pass.', 'Use straps. Clear your play space. Let the stick do the running.'].forEach((s, i) => c.fillText(s, 65, 829 + i * 39, 865));
     this.button(60, 1030, 880, 55, 'LEAVE VR', () => this.hooks.exit());
     this.buttons.forEach((b, i) => {
       c.fillStyle = b.selected ? '#f1c292' : i === this.hover ? '#4b7561' : '#2c5148'; c.beginPath(); c.roundRect(b.x, b.y, b.w, b.h, 10); c.fill();
@@ -78,24 +84,36 @@ export class XRUI {
       }
       if (hover !== this.hover) { this.hover = hover; this.drawMenu(); }
     }
-    this.hud.visible = !this.panel.visible && e.phase === 'playing';
+    const off = input[this.settings.dominant === 'right' ? 'left' : 'right'];
+    this.hud.visible = !this.panel.visible && e.phase === 'playing' && off.tracked;
+    // The call floats low and straight ahead, following your heading lazily.
+    const calling = !this.panel.visible && e.phase === 'playing' && now < this.messageUntil;
+    const f = new THREE.Vector3(0, 0, -1).applyQuaternion(q); f.y = 0; f.normalize();
+    const spot = h.clone().addScaledVector(f, 1.7); spot.y = h.y - 0.42;
+    if (!this.call.visible && calling) this.call.position.copy(spot); else this.call.position.lerp(spot, 1 - Math.exp(-dt * 3));
+    this.call.lookAt(h); this.call.visible = calling;
+    this.call.material.opacity = calling ? Math.min(1, (this.messageUntil - now) * 3, 1) : 0;
+    if (calling && this.callShown !== this.message) {
+      this.callShown = this.message; const c = this.callCanvas.getContext('2d'); c.clearRect(0, 0, 1024, 160);
+      c.fillStyle = '#183d39d9'; c.beginPath(); c.roundRect(0, 10, 1024, 140, 70); c.fill();
+      c.fillStyle = '#f8e8c7'; c.font = 'bold 54px Arial'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(this.message, 512, 82, 960);
+      this.callTexture.needsUpdate = true;
+    }
     if (!this.hud.visible) return;
-    this.hud.position.copy(h).add(new THREE.Vector3(0, -0.52, -1.5).applyQuaternion(q)); this.hud.quaternion.copy(q);
+    // Above the back of the wrist, turned to face you.
+    this.hud.position.copy(off.gripPose.p).add(new THREE.Vector3(0, 0.09, 0.07).applyQuaternion(off.gripPose.q)); this.hud.lookAt(h);
     this.tick += dt;
     if (this.tick < 0.07) return; this.tick = 0;
     const c = this.hudCanvas.getContext('2d'); c.clearRect(0, 0, 1024, 320);
     c.fillStyle = '#183d39c9'; c.beginPath(); c.roundRect(0, 0, 1024, 290, 28); c.fill();
     c.fillStyle = '#f8e8c7'; c.textAlign = 'center'; c.font = 'bold 48px Arial';
     c.fillText(e.mode === 'contest' ? `${e.score[0]} PTS    /    ${Math.ceil(e.contestTime)} SEC    /    ${25 - e.contestShots} LEFT` : `${e.score[0]}    HOME     /     AWAY    ${e.score[1]}     ·     ${e.mode === 'practice' ? 'FREE' : Math.ceil(e.shotClock)}`, 512, 68);
-    c.font = '24px Arial'; c.fillStyle = '#e4c494';
-    c.fillText(now < this.messageUntil ? this.message : e.needsClear && e.possession === 0 ? 'CLEAR IT BEYOND THE ARC' : e.ownerId === 0 ? 'YOUR BALL · GRIP TO GATHER · LIFT & RELEASE' : e.isMatch && e.possession === 1 ? 'STAY IN FRONT · HAND UP · TIME YOUR JUMP' : 'GET OPEN · CALL FOR IT', 512, 120, 950);
-    if (e.ownerId === 0 && e.ballState === 'held') {
-      c.fillStyle = '#547364'; c.fillRect(195, 156, 634, 26);
-      const window = e.releaseWindow();
-      c.fillStyle = '#addc9d'; c.fillRect(195 + 634 * (CONFIG.shot.idealTime - window) / CONFIG.shot.maxCharge, 156, 634 * 2 * window / CONFIG.shot.maxCharge, 26);
-      c.fillStyle = '#fff3da'; c.fillRect(195 + 634 * e.charge / CONFIG.shot.maxCharge, 153, 6, 32);
-    }
-    c.fillStyle = '#f3d5a8'; c.font = '22px Arial'; c.fillText(`STAMINA ${Math.round(e.human.stamina)}     ${e.heatTime > 0 ? 'ON FIRE!' : `HEAT ${e.heat}/5`}     ·     STICK CLICK: MENU`, 512, 240);
+    c.font = '26px Arial'; c.fillStyle = '#e4c494';
+    c.fillText(e.needsClear && e.possession === 0 ? 'CLEAR IT BEYOND THE ARC' : e.ownerId === 0 ? 'TRIGGER: BALL IN HAND · THROW TO SHOOT' : e.isMatch && e.possession === 1 ? 'GRIP: STANCE · A: JUMP TO BLOCK' : 'GET OPEN · X: CALL FOR IT', 512, 132, 950);
+    // Stamina: how much boost is left.
+    c.fillStyle = '#547364'; c.fillRect(212, 178, 600, 22);
+    c.fillStyle = e.human.stamina > 30 ? '#addc9d' : '#e9a070'; c.fillRect(212, 178, 6 * e.human.stamina, 22);
+    c.fillStyle = '#f3d5a8'; c.font = '24px Arial'; c.fillText(`BOOST     ${e.heatTime > 0 ? 'ON FIRE!' : `HEAT ${e.heat}/5`}     ·     Y: MENU`, 512, 250);
     this.hudTexture.needsUpdate = true;
   }
 }

@@ -22,7 +22,8 @@ export function movePlayer(p, desired, dt) {
   p.locoVel ||= new Vec3(); p.acceleration ||= new Vec3();
   const delta = desired.clone().sub(p.locoVel);
   const braking = desired.lengthSq() < p.locoVel.lengthSq() || desired.dot(p.locoVel) < 0;
-  const acceleration = braking ? 22 : p.defending ? 13 : p.burst > 0 ? 21 : 17;
+  // Quick to start, quicker to stop: a plant and a push, never a slide.
+  const acceleration = braking ? 32 : p.defending ? 24 : p.burst > 0 ? 30 : 26;
   const length = delta.length(), maximum = acceleration * dt;
   if (length > maximum) delta.scale(maximum / length);
   p.acceleration.copy(delta).scale(1 / Math.max(dt, 0.001));

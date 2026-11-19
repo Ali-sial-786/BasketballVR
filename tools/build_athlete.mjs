@@ -141,8 +141,9 @@ const matColor = (m) => gltf.materials[m].pbrMetallicRoughness.baseColorFactor.s
 // The source's rest hand is a relaxed one and is used as it is. The posed hand
 // shapes ride along as morph targets, per hand, for the game to blend.
 const MORPH = {};
-const HAND_SHAPES = ['openL', 'openR', 'ballL', 'ballR'];
-const SHAPE_SOURCE = { HandOpenL: 'openL', HandOpen: 'openR', HandBallL: 'ballL', HandBall: 'ballR' };
+const HAND_SHAPES = ['openL', 'openR', 'ballL', 'ballR', 'gripL', 'gripR'];
+// (grip: a fist round a handle, the shape a hand takes on a VR controller.)
+const SHAPE_SOURCE = { HandOpenL: 'openL', HandOpen: 'openR', HandBallL: 'ballL', HandBall: 'ballR', SupportGrip: 'gripL', HandGrip: 'gripR' };
 
 function newPart(name) { return { name, pos: [], nrm: [], w: [], kit: [], col: [], idx: [], morph: [] }; }
 function loadMesh(meshName, kitFn, triKeep = null, dropBones = null) {

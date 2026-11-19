@@ -348,15 +348,30 @@ export class HandsView {
     this.hands = {};
     for (const [name, side] of [['left', 'L'], ['right', 'R']]) {
       const mat = new THREE.MeshPhysicalMaterial({ color: 0xc48b66, roughness: 0.62, metalness: 0, clearcoat: 0.03, envMap: environment, envMapIntensity: 0.38 });
-      const group = new THREE.Group(), hand = new THREE.Mesh(handGeometry(side), mat);
-      hand.castShadow = true; group.add(hand); scene.add(group); this.hands[name] = group;
-      const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.037, 0.032, 16), material(0x2a7066)); cuff.rotation.x = Math.PI / 2; cuff.position.z = 0.018; group.add(cuff);
+      const geometry = handGeometry(side), group = new THREE.Group(), hand = new THREE.Mesh(geometry, mat);
+      hand.castShadow = true; hand.frustumCulled = false; group.add(hand); scene.add(group);
+      // A slim band at the wrist, where the hand meets the (unseen) forearm.
+      geometry.computeBoundingBox();
+      const band = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.033, 0.04, 24), new THREE.MeshStandardMaterial({ color: 0xf1ead6, roughness: 0.9 }));
+      band.position.copy(geometry.userData.wrist).addScaledVector(geometry.userData.forearm, 0.012);
+      band.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), geometry.userData.forearm); group.add(band);
+      this.hands[name] = { group, hand, open: 0, ball: 0, grip: 0.5 };
     }
   }
-  update(input, engine, playing) {
-    for (const [name, group] of Object.entries(this.hands)) {
-      const c = input[name]; group.visible = playing && input.xr && c.tracked;
-      if (group.visible) { group.position.copy(c.gripPose.p); group.quaternion.copy(c.gripPose.q); }
+  setSkin(color) { for (const h of Object.values(this.hands)) h.hand.material.color.setHex(color); }
+  update(input, engine, playing, settings = { dominant: 'right' }) {
+    const k = 1 - Math.exp(-(1 / 72) * 18);
+    for (const [name, h] of Object.entries(this.hands)) {
+      const c = input[name]; h.group.visible = playing && input.xr && c.tracked;
+      if (!h.group.visible) continue;
+      h.group.position.copy(c.gripPose.p); h.group.quaternion.copy(c.gripPose.q);
+      // The hand does what yours does: open on the ball, closed round the
+      // controller as you squeeze, half closed at rest.
+      const holding = engine.ownerId === 0 && engine.ballState === 'held' && name === settings.dominant;
+      const target = holding ? [0, 1, 0] : [0, 0, Math.min(1, 0.35 + 0.65 * Math.max(c.buttons.squeeze.value, c.buttons.trigger.value * 0.7))];
+      h.open += (target[0] - h.open) * k; h.ball += (target[1] - h.ball) * k; h.grip += (target[2] - h.grip) * k;
+      const m = h.hand.morphTargetInfluences, d = h.hand.morphTargetDictionary;
+      if (m && d) { if (d.open !== undefined) m[d.open] = h.open; if (d.ball !== undefined) m[d.ball] = h.ball; if (d.grip !== undefined) m[d.grip] = h.grip; }
     }
   }
 }

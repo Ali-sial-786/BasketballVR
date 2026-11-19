@@ -37,8 +37,12 @@ test('release timing, contest and facing all affect the result', () => {
 });
 test('physical flick uses form and gives soft releases less assistance', () => {
   const base = { from: new Vec3(0, 1.85, 0), feet: new Vec3(), aim: new Vec3(0, 0, -1), rng: () => 0.5 };
+  // From 6.1 m a natural flick is about 3.5 m/s; a token one barely leaves the hand.
   const soft = makeShot({ ...base, physicalVelocity: new Vec3(0, 0.2, -0.1) });
-  const clean = makeShot({ ...base, physicalVelocity: new Vec3(0, 2, -1) }); assert(clean.green); assert(clean.quality > soft.quality);
+  const clean = makeShot({ ...base, physicalVelocity: new Vec3(0, 3.0, -1.8) });
+  // A shooter whose natural flick is quicker is judged against their own touch.
+  assert(makeShot({ ...base, physicalVelocity: new Vec3(0, 4.5, -2.7), touch: 1.5 }).green); assert(clean.green); assert(clean.quality > soft.quality);
+  assert(soft.vel.length() < clean.vel.length() * 0.75, 'a token flick falls well short');
 });
 test('corner threes use the straight sideline, and inside jump shots are twos', () => {
   assert(isThree({ x: 6.65, z: -6.1 })); assert(!isThree({ x: 6.5, z: -6.1 })); assert(!isThree({ x: 6.55, z: -8 })); assert(isThree({ x: 0, z: 0.8 }));

@@ -70,17 +70,18 @@ export class UI {
       ['Q / Z / E', 'Crossover / between the legs / behind the back. Each changes hands. Use them against the way your defender is sliding.'],
       ['R / C / T', 'Spin / stepback / hesitation. Chain moves to build a combo; a defender caught leaning, reaching or in the air gets left behind.'],
       ['Ctrl', 'With the ball: protect it. A low dribble on your far hip, arm bar up, hard to strip. On defense: a balanced stance that slides, holds its ground and contests.'],
+      ['Shift + Space', 'Dunk: drive at the rim with Shift held and jump with the ball, facing it with nobody in the lane. Shift alone is boost on both ends.'],
       ['Space / F', 'Jump to block or rebound: you need a hand on the ball on its way up, and touching it on the way down is goaltending. F or right-click reaches for a steal; the ball has to be on your side of the dribbler, and a miss leaves you leaning.'],
       ['X / G / B', 'Pass in 2v2: X picks the right pass, G is a bounce pass under a defender, B is a lob over the top. Press X when Jax has it to call for the ball. F on a pass in flight tips it.'],
       ['Esc / M', 'Pause or return to the menu. On touch screens, use the movement pad and action buttons; drag the court to look.'],
     ];
     const vr = [
-      ['Grip → release', 'Hold either grip to gather. Lift the ball and release with an upward flick to shoot: the ball leaves along your hand’s own line and arc. Release downward to bounce it.'],
-      ['Trigger → release', 'Timed shooting: hold your ball-hand trigger, rise, then release in the green. A quick tap is a pump fake.'],
-      ['Handles', 'Sweep a low hand across your body for a crossover, or behind your hip for a wrap. Ball-hand A / B do the same; hold the left stick click with A / B for between the legs / hesitation.'],
-      ['Sticks', 'Left stick moves; click it to sprint. Right stick left / right turns, up spins, down steps back. Snap turns are the default.'],
-      ['Passing', 'Off-hand trigger picks the right pass, or calls for the ball. A real chest-height throw is a chest pass; throw it down and out for a bounce pass.'],
-      ['Defending / menu', 'Hold off-hand grip for a stance. Ball-hand trigger reaches for a steal. Off-hand lower button jumps; get a real hand on a shot to block it. Off-hand upper button or right stick click opens the menu.'],
+      ['Shoot', 'Hold your ball-hand trigger: the ball is in your palm. Shoot with a real shooting motion and let go at the release: the ball leaves with your hand’s arc, line and power. Let go without a throw and nothing happens; a soft flick falls short.'],
+      ['Jump & dunk', 'A (X if left-handed) jumps: for a jump shot, a block, a rebound. Hold boost and jump with the ball near the rim, facing it with nobody in the way: you take off for a dunk. Get the ball over the ring and slam it down.'],
+      ['Boost', 'Off-hand trigger: boost, on offence and defence. It uses stamina.'],
+      ['Dribble moves', 'Either grip makes a move. What you do picks it: sweep the ball hand across for a crossover, low through the legs, behind your hip for a wrap, turn your head for a spin, pull back for a stepback. Without a motion: crossover on the ball hand, hesitation on the other.'],
+      ['Passing', 'Off-hand lower button (X, or A if left-handed) passes, or calls for the ball. A real chest-height throw is a chest pass; throw it down and out for a bounce pass.'],
+      ['Defending / menu', 'Hold a grip for a stance. Trigger, or a real swipe through the ball, reaches for a steal. Jump and get a real hand on a shot to block it. Off-hand upper button or right stick click opens the menu.'],
     ];
     this.open(`<div class="eyebrow">A LITTLE FEEL GOES A LONG WAY</div><h2>Get in your bag.</h2><div class="help-tabs"><button data-tab="desktop" class="${tab === 'desktop' ? 'active' : ''}">DESKTOP / TOUCH</button><button data-tab="vr" class="${tab === 'vr' ? 'active' : ''}">QUEST / VR</button></div><div class="control-list">${(tab === 'vr' ? vr : desktop).map(([a, b]) => `<div class="control-row"><strong>${a}</strong><span>${b}</span></div>`).join('')}</div><p class="help-tip">${tab === 'vr' ? 'Use controller straps and a clear play space. Keep your feet inside your boundary; the stick does the running. Set your shooting hand and comfort preferences in Settings.' : 'Games are against AI. First to 11, win by 2 (cap 21), 2s and 3s. After a steal or defensive rebound, take it beyond the arc. Three-point contest: 70 seconds, 25 balls, gold balls count double, maximum 34.'}</p>`, resume);
     for (const b of this.content.querySelectorAll('[data-tab]')) b.addEventListener('click', () => this.help(b.dataset.tab));

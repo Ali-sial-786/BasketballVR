@@ -19,23 +19,50 @@ const PARENT = {
 export const BASE_SCALE = 1.0;             // the model is a life-size 1.80 m athlete
 
 // Anatomical controller hands cut from the same authored human mesh, retaining
-// the original fingers, fingernails and smooth surface normals.
+// the original fingers, fingernails and smooth surface normals, with their
+// hand shapes (open, on a ball, gripping a handle) as morph targets. Built in
+// WebXR grip space: the handle runs along -Z through the fist, the fingers
+// wrap it, the palm faces it.
 export function handGeometry(side = 'R') {
   const name = 'hand' + side, index = RIG.index[name];
   const g = RIG.lods[0].find(p => p.name === 'Athlete_Body').geo;
   const p = g.attributes.position, n = g.attributes.normal, si = g.attributes.skinIndex, sw = g.attributes.skinWeight;
-  const positions = [], normals = [], q = RIG.bindQ[name].clone().invert(), v = new THREE.Vector3(), normal = new THREE.Vector3();
+  const sparse = g.userData.shapes || [], shapes = RIG.shapes.map((shape, t) => shape.endsWith(side) ? { shape, deltas: new Map() } : null);
+  shapes.forEach((s, t) => { if (!s || !sparse[t]) return; const q = sparse[t]; for (let k = 0; k < q.idx.length; k++) s.deltas.set(q.idx[k], k); });
+  // Bone space -> grip space. Bind directions from the MakeHuman hand: fingers
+  // run down the bone (-Y); the knuckles run pinky -> index; the fist closes
+  // round a handle a little in front of and below the wrist.
+  const mirror = side === 'L' ? -1 : 1, toBone = RIG.bindQ[name].clone().invert();
+  const knuckles = new THREE.Vector3(0.027 * mirror, 0.032, 0.058).normalize().applyQuaternion(toBone);
+  const fingers = new THREE.Vector3(0, -1, 0); knuckles.addScaledVector(fingers, -knuckles.dot(fingers)).normalize();
+  const from = new THREE.Matrix4().makeBasis(fingers, knuckles, new THREE.Vector3().crossVectors(fingers, knuckles));
+  const to = new THREE.Matrix4().makeBasis(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, -1, 0).cross(new THREE.Vector3(0, 0, -1)));
+  const align = new THREE.Quaternion().setFromRotationMatrix(to.multiply(from.invert()));
+  const centre = new THREE.Vector3(-0.025 * mirror, -0.045, 0.055).applyQuaternion(toBone).applyQuaternion(align);
+  const positions = [], normals = [], morphs = shapes.map(s => s ? { p: [], n: [] } : null), v = new THREE.Vector3(), normal = new THREE.Vector3();
+  const rotate = out => out.applyQuaternion(toBone).applyQuaternion(align);
   for (let i = 0; i < g.index.count; i += 3) {
     const ids = [g.index.getX(i), g.index.getX(i + 1), g.index.getX(i + 2)];
     const weights = ids.map(id => { let w = 0; for (let k = 0; k < 4; k++) if (si.getComponent(id, k) === index) w += sw.getComponent(id, k); return w; });
     if (Math.max(...weights) < 0.55) continue;
     for (const id of ids) {
-      v.fromBufferAttribute(p, id).sub(RIG.J[name]).applyQuaternion(q); positions.push(v.x, v.y, v.z);
-      normal.fromBufferAttribute(n, id).applyQuaternion(q); normals.push(normal.x, normal.y, normal.z);
+      rotate(v.fromBufferAttribute(p, id).sub(RIG.J[name])).sub(centre); positions.push(v.x, v.y, v.z);
+      rotate(normal.fromBufferAttribute(n, id)); normals.push(normal.x, normal.y, normal.z);
+      shapes.forEach((s, t) => {
+        if (!s) return; const k = s.deltas.get(id), q = sparse[t];
+        if (k === undefined) { morphs[t].p.push(0, 0, 0); morphs[t].n.push(0, 0, 0); return; }
+        rotate(v.set(q.pos[k * 3], q.pos[k * 3 + 1], q.pos[k * 3 + 2]).multiplyScalar(1 / RIG.shapeScale)); morphs[t].p.push(v.x, v.y, v.z);
+        rotate(normal.set(q.nrm[k * 3], q.nrm[k * 3 + 1], q.nrm[k * 3 + 2]).multiplyScalar(1 / 64)); morphs[t].n.push(normal.x, normal.y, normal.z);
+      });
     }
   }
   const out = new THREE.BufferGeometry(); out.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3)); out.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-  out.rotateX(Math.PI / 2); return out;
+  const mp = [], mn = [];
+  shapes.forEach((s, t) => { if (!s) return; const a = new THREE.Float32BufferAttribute(morphs[t].p, 3), b = new THREE.Float32BufferAttribute(morphs[t].n, 3); a.name = b.name = s.shape.slice(0, -1); mp.push(a); mn.push(b); });
+  if (mp.length) { out.morphAttributes.position = mp; out.morphAttributes.normal = mn; out.morphTargetsRelative = true; }
+  // Where the wrist is, and which way the forearm runs from it, for a band.
+  out.userData.wrist = new THREE.Vector3().sub(centre); out.userData.forearm = new THREE.Vector3(0, 1, 0).applyQuaternion(align).normalize();
+  return out;
 }
 
 export const SKIN_TONES = [0xf3cfae, 0xe0b088, 0xc68e62, 0x9a6a46, 0x6b4630];
@@ -181,10 +208,13 @@ function gearPart(list, geom, bone, color, pos = [0, 0, 0], rot = null, scale = 
 }
 // Give a mesh that contains the body (its vertices starting at `offset`) the
 // hand shapes as relative morph targets, in RIG.shapes order.
-function shapesFor(g, body, offset = 0) {
+// Only the shapes a playing figure uses go on the body; the controller hands take the grips too.
+const BODY_SHAPES = ['openL', 'openR', 'ballL', 'ballR'];
+function shapesFor(g, body, offset = 0, names = BODY_SHAPES) {
   const sparse = body.userData.shapes; if (!sparse) return g;
   const count = g.attributes.position.count, positions = [], normals = [];
   RIG.shapes.forEach((name, t) => {
+    if (!names.includes(name)) return;
     const pos = new Float32Array(count * 3), nrm = new Float32Array(count * 3), s = sparse[t];
     for (let k = 0; k < s.idx.length; k++) for (let c = 0; c < 3; c++) { pos[(offset + s.idx[k]) * 3 + c] = s.pos[k * 3 + c] / RIG.shapeScale; nrm[(offset + s.idx[k]) * 3 + c] = s.nrm[k * 3 + c] / 64; }
     const a = new THREE.BufferAttribute(pos, 3), b = new THREE.BufferAttribute(nrm, 3); a.name = b.name = name; positions.push(a); normals.push(b);

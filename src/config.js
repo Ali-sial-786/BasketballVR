@@ -9,7 +9,7 @@ export const CONFIG = {
   ball: { radius: 0.12, gravity: 9.81, drag: 0.0206, magnus: 0.0026, spinDecay: 0.05,
     floorRestitution: 0.76, floorFriction: 0.6, rimRestitution: 0.6, rimFriction: 0.32,
     boardRestitution: 0.74, boardFriction: 0.42 },
-  player: { speed: 3.5, sprint: 5.0, radius: 0.34, jumpSpeed: 3.8, shotJump: 3.0, rimJump: 4.25, staminaRegen: 14,
+  player: { speed: 4.4, sprint: 6.4, radius: 0.34, jumpSpeed: 3.9, shotJump: 3.0, rimJump: 4.25, dunkJump: 4.45, staminaRegen: 15,
     heights: [1.92, 1.96, 1.94, 1.88], ballTax: 0.93 },
   match: { target: 11, cap: 21, shotClock: 18, offensiveReboundClock: 12 },
   // A quick, compact catch-and-shoot release: into the pocket, set point before
@@ -23,9 +23,9 @@ export const CONFIG = {
 // bite: chance an AI defender leaves their feet for a pump fake.
 // jumpiness: how often an AI closeout leaves the floor to challenge a jump shot.
 export const DIFFICULTIES = {
-  rookie: { name: 'Rookie', assist: 0.9, aimCone: 0.7, aiSpeed: 2.5, aiAccuracy: 0.65, stealRate: 0.12, greenWindow: 0.12, react: 0.34, bite: 0.65, resist: 0.05, jumpiness: 0.28 },
-  park: { name: 'Park', assist: 0.7, aimCone: 0.5, aiSpeed: 3.05, aiAccuracy: 0.8, stealRate: 0.22, greenWindow: 0.075, react: 0.23, bite: 0.42, resist: 0.2, jumpiness: 0.38 },
-  allstar: { name: 'All-star', assist: 0.4, aimCone: 0.3, aiSpeed: 3.5, aiAccuracy: 0.9, stealRate: 0.34, greenWindow: 0.05, react: 0.15, bite: 0.2, resist: 0.36, jumpiness: 0.48 },
+  rookie: { name: 'Rookie', assist: 0.9, aimCone: 0.7, aiSpeed: 3.2, aiAccuracy: 0.65, stealRate: 0.12, greenWindow: 0.12, react: 0.34, bite: 0.65, resist: 0.05, jumpiness: 0.28 },
+  park: { name: 'Park', assist: 0.7, aimCone: 0.5, aiSpeed: 3.9, aiAccuracy: 0.8, stealRate: 0.22, greenWindow: 0.075, react: 0.23, bite: 0.42, resist: 0.2, jumpiness: 0.38 },
+  allstar: { name: 'All-star', assist: 0.4, aimCone: 0.3, aiSpeed: 4.5, aiAccuracy: 0.9, stealRate: 0.34, greenWindow: 0.05, react: 0.15, bite: 0.2, resist: 0.36, jumpiness: 0.48 },
 };
 export const MODES = {
   '1v1': { name: '1v1 · ISO BALL', short: '1v1', subtitle: 'Just you and your defender. First to 11.' },

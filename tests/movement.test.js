@@ -7,7 +7,7 @@ import { GameEngine } from '../src/game/engine.js';
 const player = () => ({ pos: new Vec3(), vel: new Vec3(), locoVel: new Vec3(), acceleration: new Vec3(), yaw: Math.PI, side: 1, dribble: 0, defending: false });
 test('movement accelerates and brakes continuously instead of snapping', () => {
   const p = player(), desired = new Vec3(3.5, 0, 0);
-  movePlayer(p, desired, 1 / 120); assert(p.vel.x > 0 && p.vel.x < 0.2);
+  movePlayer(p, desired, 1 / 120); assert(p.vel.x > 0 && p.vel.x < 0.3);
   for (let i = 0; i < 60; i++) movePlayer(p, desired, 1 / 120);
   assert(Math.abs(p.vel.x - 3.5) < 0.01);
   movePlayer(p, new Vec3(), 1 / 120); assert(p.vel.x > 3 && p.vel.x < 3.5);

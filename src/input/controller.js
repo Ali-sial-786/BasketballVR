@@ -25,7 +25,7 @@ export class Controller {
     // Reject corrupt/reacquired tracking spikes without amplifying real flicks.
     if (this.linVel.length() > 16) this.linVel.set(0, 0, 0);
     this.previous.copy(this.gripRef); this.previousTime = t;
-    this.history.push({ t, p: this.gripPose.p.clone(), v: this.linVel.clone() });
+    this.history.push({ t, p: this.gripPose.p.clone(), ref: this.gripRef.p.clone(), v: this.linVel.clone() });
     if (this.history.length > 24) this.history.shift();
   }
   releaseVelocity(t) {
