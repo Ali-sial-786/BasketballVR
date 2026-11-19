@@ -83,3 +83,16 @@ What a modern basketball uniform looks like, and how each trait is reproduced:
 | Contrast side panels with piping; rib-knit neck, armhole and waist bindings; twin-needle hems | Painted in bind space by the kit shader |
 
 Building note: with bpy 5.3 a new shape key starts from the current mix of the others, so every expression key compounded the ones before it (the head came out as a disc). `tools/rebuild_anatomy.py` now creates each key from the basis alone, which is correct in every Blender version.
+
+## Hands
+
+| What a hand does | In the game |
+| --- | --- |
+| Shooting hand: ball on the pads of spread fingers, wrist cocked back under it at the set point; on the side of the ball down in the pocket | Palm seated on the ball at a point that moves from side-and-behind to under as the ball rises; wrist allowed about 75° of extension |
+| Guide hand: flat on the side of the ball, fingers up, comes off without pushing | Seated on the side; lifts away open as the shooting arm extends |
+| Follow-through: wrist snapped over, fingers hanging toward the rim | Wrist swings from cocked to flexed through release and holds |
+| Contest and block: straight arm, big flat hand, palm to the ball | Fingers in line with the forearm, open shape, palm forward |
+| On-ball defence: low hand palm up under the dribble, high hand in the passing lane | Open shape, wrists straight |
+
+Two faults were behind the old look. Hands were turned to fixed angles in the body’s frame, so wherever the forearm pointed somewhere else the wrist kinked. And the only finger pose was a full grip scaled to a third, which shortens the fingers into a claw instead of half-closing them.
+

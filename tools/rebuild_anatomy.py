@@ -193,7 +193,7 @@ for name in ['FaceNarrow','FaceRound','FaceSoft','EyesOpen','Smile','MouthSeriou
             key.data[i].co.z+=.005*front*math.exp(-((z-1.676)/.015)**2)
 # Curl real finger chains around a racket handle while keeping wrist skin continuous.
 across = (joint('finger5-1.R')-joint('finger2-1.R')).normalized()
-transforms={}
+transforms={};finger_axis={}
 for finger in range(1,6):
     heads=[joint('finger%d-%d.R'%(finger,j)) for j in range(1,4)]
     axis=across if finger!=1 else Vector((0,0,1))
@@ -201,6 +201,7 @@ for finger in range(1,6):
     # Select the curl direction bringing the distal phalanx toward the handle.
     signs=[-1.,1.]
     sign=min(signs,key=lambda s:(heads[0]+Matrix.Rotation(s*1.3,4,axis)@(heads[2]-heads[0])-target).length)
+    finger_axis[finger]=(axis,sign)
     angles=[1.6,2.8,3.5] if finger!=1 else [1.0,1.6,2.0]
     posehead=heads[0].copy()
     for j in range(3):
@@ -216,6 +217,34 @@ for i,v in enumerate(body.data.vertices):
         if name in transforms:
             old,new,rot=transforms[name]; delta+=(new+rot@(v.co-old)-v.co)*assignment.weight
     key.data[i].co+=delta
+# Hand shapes for play. The rest hand is a relaxed one; these are posed with real
+# joint rotations skinned by the finger weights. (A full grip scaled down to a
+# fraction is not a half-closed hand: it shortens the fingers into a claw.)
+# curl: how far each phalanx turns toward the palm, knuckle to tip (radians).
+# spread: how far the index and little finger fan away from the middle of the hand.
+def hand_shape(name,curl,spread,thumb_curl,thumb_spread):
+    key=body.shape_key_add(name=name,from_mix=False);pose={}
+    along=(joint('finger3-2.R')-joint('finger3-1.R')).normalized();normal=across.cross(along).normalized()
+    for finger in range(1,6):
+        heads=[joint('finger%d-%d.R'%(finger,j)) for j in range(1,4)];axis,sign=finger_axis[finger]
+        angles=thumb_curl if finger==1 else curl
+        fan=Matrix.Rotation(thumb_spread if finger==1 else spread*(1.,1/3,-1/3,-1.)[finger-2],4,normal)
+        posehead=heads[0].copy()
+        for j in range(3):
+            rot=Matrix.Rotation(sign*angles[j],4,axis)
+            if j:posehead=posehead+previous@(heads[j]-heads[j-1])
+            pose['grip_finger%d-%d.R'%(finger,j+1)]=(heads[j],heads[0]+fan@(posehead-heads[0]),fan@rot)
+            previous=rot
+    for i,v in enumerate(body.data.vertices):
+        delta=Vector()
+        for assignment in v.groups:
+            group=body.vertex_groups[assignment.group].name
+            if group in pose:
+                old,new,rot=pose[group];delta+=(new+rot@(v.co-old)-v.co)*assignment.weight
+        key.data[i].co+=delta
+HAND_SHAPES=['HandOpen','HandBall']
+hand_shape('HandOpen',[-.10,-.20,-.26],.15,[-.05,-.10,-.15],.25)   # flat and spread: a hand in a passing lane
+hand_shape('HandBall',[.10,.30,.48],.22,[.05,.15,.25],.45)         # spread wide round a basketball
 for vg in list(body.vertex_groups):
     if vg.name.startswith('grip_'):body.vertex_groups.remove(vg)
 
@@ -841,6 +870,7 @@ support_spec = importlib.util.spec_from_file_location('support_grip', str(Path(_
 support_module = importlib.util.module_from_spec(support_spec)
 support_spec.loader.exec_module(support_module)
 support_module.add_support_grip(body)
+for shape in HAND_SHAPES:support_module.mirror_hand_key(body,shape,shape+'L')
 # The export contains baked geometry, a 15-bone identity-axis rig and real morphs.
 bpy.ops.object.select_all(action='DESELECT')
 for o in bpy.context.scene.objects:o.select_set(True)

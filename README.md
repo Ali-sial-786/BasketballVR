@@ -103,6 +103,7 @@ Use controller straps and a clear boundary. You can stay physically in one place
 - **Floor.** Plank relief, grain and gloss variation from a CC0 scanned wood floor under a clear coat. Reflections sharpen at grazing angles and ripple with the planks.
 - **Athletes.** Skin with mottling, fine grain, flush at the knees, elbows, knuckles, ears and nose, and patches of sweat sheen that move with the body. Striped crew socks, shoes with a team toe cap and heel. Each player wears their own kit: compression arm or leg sleeve, headband, wristbands, shoe colour, and a fade haircut.
 - **Uniforms.** Cut like the real thing: the jersey is worn out and hangs from the chest and shoulder blades straight over the waistband; the shorts are loose, span from leg to leg down to a dropped crotch and flare to a bound hem above the knee. The garments are draped, not inflated: eased off the body, hung from whatever holds the cloth out above, relaxed until taut and kept clear of the skin and of each other (`tools/rebuild_anatomy.py`). The cloth is an eyelet-mesh polyester knit with a soft sheen at grazing angles, drape folds, yarn variation, rib-knit bindings and waistband, contrast side panels edged with piping, and twin-needle stitching at the hems. Lettering is two-colour tackle twill, pressed into the cloth: the wordmark and number on the chest, the player’s name and a large number on the back, in an original block alphabet drawn as strokes (`src/render/kitprint.js`), so it is identical on every device.
+- **Hands.** Each hand has three shapes it blends between: relaxed, open and flat (defending, contesting, blocking, reaching), and spread round the ball (shooting, catching, dribbling). The shapes are posed with real finger-joint rotations in `tools/rebuild_anatomy.py` and shipped as sparse morph targets. Wrists obey a wrist’s limits: a hand is aimed by where its fingers point and where its palm faces, and bends from the line of the forearm only as far as a wrist can (`Humanoid.aimHand`). A hand on the ball is seated on it: the palm goes to a chosen point on the ball and the wrist follows.
 - **Ball.** Eight panels, recessed channels and a pebbled grain that catches the lights; it turns with the simulated spin.
 - First person, or a broadcast camera over the ball-hand shoulder (**V**). Watch Gameplay uses a low sideline camera that travels with the play.
 - First-person desktop and touch use the athlete’s skinned arms; the shooting hand carries the ball a little wider there so it frames the rim instead of hiding it. Quest uses the tracked controller hands.
@@ -143,7 +144,7 @@ The outdoor baseline was recorded from `fef750d` before the arena, anatomy, move
 | `src/game/demo.js` | Contest demo commands; spectator pickup uses normal match AI. |
 | `src/xr/` | Session lifecycle, comfort preferences, world-space menu and headset HUD. |
 | `src/ui.js`, `src/style.css` | Desktop menu, HUD, release meter, shot report, results and help. |
-| `tools/review_motion.mjs` | Renders contact sheets of the live rig for reviewing poses and motion. |
+| `tools/review_motion.mjs` | Renders contact sheets of the live rig for reviewing poses and motion (`hands` and `shapes` are close-ups of the hands). |
 | `tools/build_crowd.mjs` | Builds the spectator model (`crowd.json` / `crowd.bin`) from the athlete. |
 
 ## Rebuilding character assets

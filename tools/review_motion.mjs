@@ -1,7 +1,7 @@
 // Contact sheets of the real game's motion: every cell is the live simulation
 // and rig, stepped at a fixed 60 Hz and rendered from a review camera.
 //   REVIEW_URL=http://127.0.0.1:5173 node tools/review_motion.mjs shot
-// Sheets: shot, handles, defense, pass, rim, views. Output: test-results/motion-<sheet>.jpg
+// Sheets: shot, handles, defense, pass, rim, views, hands. Output: test-results/motion-<sheet>.jpg
 import { chromium } from 'playwright';
 import fs from 'node:fs/promises';
 const sheet = process.argv[2] || 'shot', url = process.env.REVIEW_URL || 'http://127.0.0.1:5173';
@@ -86,6 +86,35 @@ const data = await page.evaluate(async (sheet) => {
     until(() => e.ownerId === 0, 400); e.human.pos.set(0, 0, -4.4); i.yaw = Math.PI; run(10); i.keys.add('KeyW'); i.keys.add('ShiftLeft'); until(() => e.human.pos.z < -5.0, 200);
     i.mouseHeld = true; i.push('gather', true); until(() => e.charge >= 0.5); i.keys.delete('KeyW'); snap('dunk rise', SIDE); until(() => e.charge >= 0.62); snap(`dunk top y=${e.ball.pos.y.toFixed(2)}`, SIDE);
     i.mouseHeld = false; i.push('release', {}); run(3); snap(`dunk=${e.shot?.dunk} +3f`, { from: [3, 3.2, -3.5], at: [0, 3, -6.1], fov: 45 }); run(8); snap('dunk +11f', { from: [3, 3.2, -3.5], at: [0, 3, -6.1], fov: 45 }); run(20); snap(`after ${e.lastResult?.label}`, { from: [3, 3.2, -3.5], at: [0, 2.6, -6.1], fov: 45 });
+  } else if (sheet === 'hands') {
+    // Close on the hands: where the wrists and fingers go when shooting and defending.
+    const hand = (label, side, { target = 0, orbit = 60, dist = 0.75, lift = 0.1 } = {}) => {
+      const view = g.views()[target], p = e.players[target], at = view.h.worldPos('hand' + side, camera.position.clone()), a = p.yaw + orbit * Math.PI / 180;
+      snap(label, { from: [at.x + Math.sin(a) * dist, at.y + lift, at.z + Math.cos(a) * dist], at: [at.x, at.y + 0.03, at.z], fov: 34 });
+    };
+    begin('practice', true); e.human.pos.set(2.5, 0, -1.5); i.yaw = Math.atan2(-2.5, -6.1 + 1.5); run(20);
+    const S = e.human.side > 0 ? 'R' : 'L', G = S === 'R' ? 'L' : 'R';
+    i.mouseHeld = true; i.push('gather', true); run(1);
+    until(() => e.charge >= 0.16); hand('pocket: shooting hand', S, { orbit: -70 }); hand('pocket: guide hand', G, { orbit: 70 });
+    until(() => e.charge >= 0.36); hand('set point: shooting side', S, { orbit: -80 }); hand('set point: front', S, { orbit: 15, dist: 0.9 }); hand('set point: behind', S, { orbit: 170, dist: 0.9 });
+    until(() => e.charge >= 0.6); hand('extension: side', S, { orbit: -80 }); hand('extension: front', S, { orbit: 20, dist: 0.9 });
+    i.mouseHeld = false; i.push('release', {}); run(4); hand('follow +4f: side', S, { orbit: -80 }); run(10); hand('follow +14f: side', S, { orbit: -80 }); hand('follow +14f: front', S, { orbit: 25, dist: 0.9 }); hand('follow: guide hand', G, { orbit: 60 });
+    begin('1v1'); freezeAI(); const d = e.players[1];
+    e.giveBall(d); e.possession = 1; d.pos.set(0, 0, -1); d.yaw = Math.PI; e.human.pos.set(0, 0, -2.25); i.yaw = 0; i.keys.add('ControlLeft'); run(40);
+    hand('stance: right hand', 'R', { orbit: 40 }); hand('stance: left hand', 'L', { orbit: -40 }); hand('stance: both, front', 'R', { orbit: 10, dist: 1.5, lift: 0.2 });
+    i.push('steal', true); run(6); hand('reach +6f: right', 'R', { orbit: 60 }); hand('reach +6f: left', 'L', { orbit: -60 });
+    run(60); d.action = 'shooting'; d.actionTime = 2; d.charge = 0.5; e.beginGather(d); run(14);
+    hand('contest: right', 'R', { orbit: 50 }); hand('contest: left', 'L', { orbit: -50 }); hand('contest: front', 'R', { orbit: 10, dist: 1.6, lift: -0.3 });
+    d.charge = 0.6; i.push('jump', true); run(14); hand('block: right', 'R', { orbit: 50 }); hand('block: left', 'L', { orbit: -50 });
+  } else if (sheet === 'shapes') {
+    // The hand shapes on their own: rest, open, on the ball, from four sides.
+    begin('1v1', true); freezeAI(); run(30);
+    const view = g.views()[1], p = e.players[1];
+    for (const [name, open, ball] of [['rest', 0, 0], ['open', 1, 0], ['ball', 0, 1]]) for (const [label, orbit, lift] of [['outside', 90, 0.05], ['front', 0, 0.05], ['inside', -90, 0.05], ['above', 60, 0.5]]) {
+      view.h.setHandShape('L', open, ball); view.h.setHandShape('R', open, ball);
+      const at = view.h.worldPos('handL', camera.position.clone()), a = p.yaw + orbit * Math.PI / 180;
+      snap(`${name}: ${label}`, { from: [at.x + Math.sin(a) * 0.5, at.y - 0.06 + lift, at.z + Math.cos(a) * 0.5], at: [at.x, at.y - 0.07, at.z], fov: 30 });
+    }
   } else if (sheet === 'views') {
     hud(true);
     begin('1v1'); hud(true); run(80); snap('1v1 first person'); i.mouseHeld = true; i.push('gather', true); until(() => e.charge >= 0.3); snap('FP gather .3'); until(() => e.charge >= 0.6); snap('FP gather .6'); i.mouseHeld = false; i.push('release', {}); run(8); snap('FP released'); run(40); snap('FP result');

@@ -14,6 +14,7 @@ globalThis.fetch = async url => {
 const { loadAthlete, Humanoid, handGeometry } = await import('../src/render/humanoid.js');
 const { loadClips, applyClip, clipInfo } = await import('../src/render/clips.js');
 await loadAthlete('assets/models/'); await loadClips('assets/anim/');
+const BIND = JSON.parse(await fs.readFile(fileURLToPath(new URL('../public/assets/models/athlete.json', import.meta.url))));
 test('detailed basketball athlete has valid smooth normals, skin weights and complete anatomical hands', () => {
   const h = new Humanoid({ headgear: 'bare' }), g = h.mesh.geometry;
   assert(g.index.count / 3 > 40000); assert.equal(h.boneList.length, 17);
@@ -187,4 +188,48 @@ test('passes are thrown: chest out in front, bounce pushed down, lob from overhe
     heights[kind] = (left.y + right.y) / 2; s.done();
   }
   assert(heights.bounce < heights.chest - 0.12); assert(heights.lob > heights.chest + 0.4);
+});
+test('hands open flat, wrap a ball, and never shorten their fingers', () => {
+  const h = new Humanoid({ headgear: 'bare' }), g = h.mesh.geometry, P = g.attributes.position;
+  for (const side of ['L', 'R']) for (const shape of ['open', 'ball']) {
+    const index = h.mesh.morphTargetDictionary[shape + side], delta = g.morphAttributes.position[index];
+    assert.equal(g.morphTargetsRelative, true);
+    let moved = 0, furthest = 0, tip = 0; const wrist = new THREE.Vector3(...BIND.joints['hand' + side]), v = new THREE.Vector3(), d = new THREE.Vector3();
+    for (let i = 0; i < delta.count; i++) {
+      const length = d.fromBufferAttribute(delta, i).length(); if (length < 1e-5) continue;
+      moved++; furthest = Math.max(furthest, length);
+      // Compare reach from the wrist before and after: a posed finger keeps its length.
+      const rest = v.fromBufferAttribute(P, i).distanceTo(wrist); if (rest > tip) tip = rest;
+      assert(Math.abs(v.add(d).distanceTo(wrist) - rest) < 0.03, `${shape}${side} keeps finger length`);
+      assert(rest < 0.26, 'only the hand moves');
+    }
+    assert(moved > 800 && furthest > 0.012 && furthest < 0.07, `${shape}${side}: ${moved} vertices, ${furthest.toFixed(3)} m`);
+  }
+  h.setHandShape('L', 0.25, 1); h.setHandShape('R', 1, 0);
+  const m = h.mesh.morphTargetInfluences, at = name => m[h.mesh.morphTargetDictionary[name]];
+  assert.deepEqual([at('openL'), at('ballL'), at('openR'), at('ballR')], [0.25, 1, 1, 0]);
+});
+test('a wrist bends only as far as a wrist can, whatever is asked of it', () => {
+  const h = new Humanoid({ headgear: 'bare' }), fore = new THREE.Vector3(), fingers = new THREE.Vector3(), palm = new THREE.Vector3(), q = new THREE.Quaternion(), elbow = new THREE.Vector3();
+  const measure = side => {
+    h.worldPos('hand' + side, fore).sub(h.worldPos('elbow' + side, elbow)).normalize(); h.bones['hand' + side].getWorldQuaternion(q);
+    fingers.set(0, -1, 0).applyQuaternion(q); palm.copy(h.palm(side)).applyQuaternion(q);
+    return fore.angleTo(fingers);
+  };
+  for (const side of ['L', 'R']) {
+    const sign = side === 'L' ? 1 : -1;
+    h.reset(); h.update(); h.ikArm(side, new THREE.Vector3(sign * 0.2, 2.1, 0.3), new THREE.Vector3(sign * 0.5, 1.5, 0.45)); h.update();
+    // A contest: fingers along the forearm, palm to the shooter.
+    h.aimHand(side, fore.clone(), new THREE.Vector3(0, 0, 1), 0.25); h.update();
+    assert(measure(side) < 0.02, 'straight through the wrist'); assert(palm.z > 0.9, 'palm faces forward');
+    // Asked to fold the hand flat back onto the forearm: it stops at the limit.
+    h.aimHand(side, new THREE.Vector3(0, -1, 0.1), new THREE.Vector3(0, 0, 1), 1.15); h.update();
+    assert(measure(side) < 1.16 + 0.36, `wrist held to its limit (${measure(side).toFixed(2)})`);
+    // Sideways there is very little.
+    h.aimHand(side, new THREE.Vector3(sign, 0.3, 0), new THREE.Vector3(0, 0, 1), 1.15); h.update();
+    assert(measure(side) < 0.6, `little sideways bend (${measure(side).toFixed(2)})`);
+    // A kinked hand left by an animation is eased back within reach.
+    h.setWorldQuat('hand' + side, new THREE.Quaternion().setFromEuler(new THREE.Euler(0.3, 0, sign * 1.9))); h.update(); h.relaxWrist(side, 0.6); h.update();
+    assert(measure(side) < 0.6 + 0.36);
+  }
 });

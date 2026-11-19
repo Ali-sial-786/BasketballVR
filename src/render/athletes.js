@@ -11,6 +11,10 @@ const UP = new THREE.Vector3(0, 1, 0), V = (x, y, z) => new THREE.Vector3(x, y, 
 const SKINS = [0xbb815a, 0x815335, 0x64422e, 0xd3a17c];
 const ease = t => t * t * (3 - 2 * t), clamp01 = t => Math.min(1, Math.max(0, t));
 const _euler = new THREE.Euler(), _quat = new THREE.Quaternion(), _current = new THREE.Vector3();
+const _fingers = new THREE.Vector3(), _palm = new THREE.Vector3(), _rootInverse = new THREE.Quaternion();
+// Hand shapes as [open, ball]; ALONG: fingers in line with the forearm.
+const REST = [0, 0], OPEN = [1, 0], HALF_OPEN = [0.5, 0], ON_BALL = [0, 1], ALONG = Symbol('along the forearm');
+const PALM = 0.085;   // wrist to the middle of the palm, metres at life size
 function mirrorPose(h) {
   const mirror = q => q.set(q.x, -q.y, -q.z, q.w);
   for (const name of ['hips', 'spine', 'chest', 'neck', 'head']) mirror(h.bones[name].quaternion);
@@ -41,8 +45,8 @@ export class PlayerView {
     this.previous = this.h.snapshot();
     // Each arm eases between jobs: the IK weight and its wrist follow the
     // target in body space, so a hand never pops from a dribble to a release.
-    this.arms = { L: { weight: 0, local: new THREE.Vector3(), pole: new THREE.Vector3(), pitch: -1.4, roll: 0, wrist: 0 },
-      R: { weight: 0, local: new THREE.Vector3(), pole: new THREE.Vector3(), pitch: -1.4, roll: 0, wrist: 0 } };
+    this.arms = { L: { weight: 0, local: new THREE.Vector3(), pole: new THREE.Vector3(), wrist: 0, q: new THREE.Quaternion(), open: 0, ball: 0 },
+      R: { weight: 0, local: new THREE.Vector3(), pole: new THREE.Vector3(), wrist: 0, q: new THREE.Quaternion(), open: 0, ball: 0 } };
     this.crouch = 0; this.lean = 0; this.roll = 0; this.landTime = 0; this.lastJump = 0;
   }
 
@@ -147,7 +151,7 @@ export class PlayerView {
       this.root.position.z += (p.pos.z - 0.22 * Math.cos(p.yaw) - neck.z) * weight;
       h.update();
     }
-    const localToWorld = point => this.root.localToWorld(point);
+    const localToWorld = point => this.root.localToWorld(point), bodyDir = v => v.applyQuaternion(this.root.quaternion);
     const receiving = engine.passInfo?.to === p.id && ball.distanceTo(localToWorld(V(0, 1.35, 0.2))) < 2.1;
     const securing = owns && engine.catchFrom && !gathered;
     const eyeTarget = (owns && !securing || following) ? new THREE.Vector3().copy(CONFIG.hoop) : ball;
@@ -162,6 +166,18 @@ export class PlayerView {
       const strong = side === (hand > 0 ? 'R' : 'L');
       let target = null, pitch = null, roll = 0, rate = 16, snap = false;
       let pole = V(sign * 0.5, 1.08, -0.02);
+      // Wrist and fingers. aim: [fingers, palm] as world directions (the wrist
+      // gives what it can, up to `bend` from the line of the forearm).
+      // shape: [open, ball] (0, 0 is a relaxed hand).
+      let aim = null, bend = 1.0, shape = REST;
+      // Seat a hand on the ball: `at` is where the palm touches it, as a
+      // direction from the ball's centre, and `fingers` where they point, both
+      // in body space. The wrist goes wherever that puts it.
+      const hold = (at, fingers) => {
+        const c = bodyDir(at).normalize(), f = bodyDir(fingers); f.addScaledVector(c, -f.dot(c)).normalize();
+        target = ball.clone().addScaledVector(c, CONFIG.ball.radius + 0.012).addScaledVector(f, -PALM * this.root.scale.y);
+        aim = [f, c.negate()]; shape = ON_BALL;
+      };
       if (firstPerson && !strong && (gathered && charge > 0.24 || following)) {
         // Through the shooter's own eyes the guide hand slides off early and
         // stays low, so the forearm never crosses the view of the rim.
@@ -172,13 +188,21 @@ export class PlayerView {
         // Shooting hand under and behind the ball, elbow beneath it; the guide
         // hand rides the side and never pushes.
         const under = (gathered || p.pump > 0) && strong;
-        target = ball.clone().add(V(sign * (under ? 0.045 : 0.125), under ? -0.115 : -0.03, under ? -0.085 : -0.06).applyAxisAngle(UP, this.bodyYaw));
-        pitch = under ? (finishing ? -2.35 : -1.92) : -1.72; roll = sign * (under ? 1.18 : 0.25); snap = !receiving;
+        // Shooting hand: the ball sits on the pads of a spread hand, wrist
+        // cocked back under it. Guide hand: flat on the side, fingers up.
+        // Down in the pocket both hands are on the sides of the ball, fingers
+        // forward; as it comes up the shooting hand turns under it and the
+        // guide hand stands up on its side.
+        const lift = THREE.MathUtils.smoothstep((ball.y - p.jump) / this.root.scale.y, 1.1, 1.55);
+        if (under) { hold(V(sign * 0.72, -0.2, -0.62).lerp(V(sign * 0.3, -0.8, -0.52), lift), V(0, -0.3, 1).lerp(V(0, 1, finishing ? 0.3 : 0), lift)); bend = 1.3; }
+        else if (gathered || p.pump > 0) hold(V(sign * 0.85, -0.12, -0.45).lerp(V(sign * 0.93, -0.12, 0.12), lift), V(0, -0.25, 1).lerp(V(0, 1, -0.1), lift));
+        else hold(V(sign * 0.82, -0.28, -0.42), V(0, 0.65, 0.75));
+        snap = !receiving;
         // Elbow in, under the ball and in line with the shoulder.
         pole = under ? V(sign * 0.21, 1.05, 0.5) : V(sign * 0.56, 1.0, 0.16);
         if (receiving) target.lerp(h.worldPos('hand' + side, _current), THREE.MathUtils.smoothstep(ball.distanceTo(_current), 0.45, 2.0));
         // The guide hand comes off as the shooting arm extends past the set point.
-        if (gathered && !under && charge > S.takeoff + 0.1 && !finishing) { target = localToWorld(V(sign * 0.21, 1.6, 0.3)); pitch = -2.6; roll = sign * 0.2; snap = false; rate = 20; pole = V(sign * 0.6, 1.25, 0.2); }
+        if (gathered && !under && charge > S.takeoff + 0.1 && !finishing) { target = localToWorld(V(sign * 0.21, 1.6, 0.3)); aim = [bodyDir(V(0, 1, 0.12)), bodyDir(V(-sign, 0, 0.25))]; shape = HALF_OPEN; snap = false; rate = 20; pole = V(sign * 0.6, 1.25, 0.2); }
       } else if (dribbling && strong) {
         // The hand rides the ball through the top of each bounce, pushes it
         // down, then waits for it rather than chasing it to the floor.
@@ -186,15 +210,16 @@ export class PlayerView {
         target = ball.clone().add(V(sign * 0.02, 0.128, -0.05).applyAxisAngle(UP, this.bodyYaw));
         if (!move || !isTransfer(move.kind)) target.y = Math.max(target.y, top - 0.2);
         else target.y = Math.max(target.y, p.jump + 0.5);
-        pitch = dribbleInHand(p) || move ? -1.22 : -1.42; roll = -sign * 1.05; snap = true;
+        // Palm over the ball, fingers ahead of it, spread; the wrist follows the ball down.
+        aim = [bodyDir(V(0, dribbleInHand(p) || move ? -0.32 : -0.12, 1)), ball.clone().sub(target).addScaledVector(UP, -0.2)]; bend = 0.9; shape = ON_BALL; snap = true;
         pole = V(sign * 0.62, 1.05, -0.12);
       } else if (dribbling && move && isTransfer(move.kind) && moveT < 0.5) {
         // The other hand is already down, waiting for the ball to arrive.
         target = localToWorld(V(sign * 0.4, 0.62, move.kind === 'behind' ? -0.06 : move.kind === 'legs' ? 0.12 : 0.34));
-        pitch = -1.3; roll = -sign * 0.9; rate = 22;
+        aim = [bodyDir(V(-sign * 0.2, -0.3, 1)), bodyDir(V(-sign * 0.5, -0.8, 0))]; shape = ON_BALL; rate = 22;
       } else if (dribbling && p.protect > 0.15) {
         // Arm bar: forearm up between the defender and the ball.
-        target = localToWorld(V(sign * 0.2, 1.2, 0.4)); pitch = -2.3; roll = -sign * 1.3; rate = 9 + 8 * p.protect;
+        target = localToWorld(V(sign * 0.2, 1.2, 0.4)); aim = [bodyDir(V(-sign * 0.75, 0.55, 0.35)), bodyDir(V(0, -0.4, 0.9))]; bend = 0.5; shape = HALF_OPEN; rate = 9 + 8 * p.protect;
         pole = V(sign * 0.7, 1.15, 0.1);
       } else if (following) {
         // Hold the follow-through: full extension, wrist snapped over, while
@@ -207,10 +232,14 @@ export class PlayerView {
         else if (strong) {
           const layup = p.action === 'layup';
           target = localToWorld(V(sign * 0.15, (layup ? 2.26 : 2.2) + 0.1 * out - 0.75 * ease(relax), (layup ? 0.36 : 0.38) + (layup ? 0.16 : 0.12) * out - 0.1 * ease(relax)));
-          pitch = layup ? -2.3 + 0.9 * out : -1.9 + 1.25 * out; roll = sign * 0.5 * (1 - out);
+          // The wrist snaps through: from cocked back under the ball to hanging
+          // over the front of it, fingers pointing down at the rim.
+          const snapped = THREE.MathUtils.lerp(2.3, layup ? 0.25 : -0.72, ease(out));
+          aim = [bodyDir(V(0, Math.sin(snapped), Math.cos(snapped))), bodyDir(V(0, -Math.cos(snapped), Math.sin(snapped)))]; bend = 1.3;
+          shape = out < 0.5 ? ON_BALL : REST;
           pole = layup ? V(sign * 0.3, 1.4, 0.5) : V(sign * 0.2, 1.5, 0.6);
         } else {
-          target = localToWorld(V(sign * (p.action === 'follow' ? 0.24 : 0.34), (p.action === 'follow' ? 1.48 : 1.26) - 0.4 * ease(relax), 0.3)); pitch = -2.5; roll = sign * 0.2; pole = V(sign * 0.6, 1.2, 0.2);
+          target = localToWorld(V(sign * (p.action === 'follow' ? 0.24 : 0.34), (p.action === 'follow' ? 1.48 : 1.26) - 0.4 * ease(relax), 0.3)); aim = [bodyDir(V(0, 1, 0.2)), bodyDir(V(-sign, 0, 0.3))]; bend = 0.4; shape = HALF_OPEN; pole = V(sign * 0.6, 1.2, 0.2);
         }
         rate = 26;
       } else if (p.action === 'pass') {
@@ -224,35 +253,38 @@ export class PlayerView {
       } else if (p.action === 'reach') {
         // One hand goes for the ball, the other stays home for balance.
         const u = Math.sin(Math.PI * clamp01(1 - p.actionTime / 0.36)), near = localToWorld(V(sign * 0.2, 1, 0.2)).distanceTo(p.reach) <= localToWorld(V(-sign * 0.2, 1, 0.2)).distanceTo(p.reach);
-        if (near) { target = localToWorld(V(sign * 0.28, 0.95, 0.3)).lerp(new THREE.Vector3().copy(p.reach), Math.pow(u, 0.6)); pitch = -1.5; roll = -sign * 0.7; rate = 34; }
-        else { target = localToWorld(V(sign * 0.46, 1.02, -0.05)); pitch = -1.2; rate = 14; }
+        // A swipe: straight through the wrist, palm down and in.
+        if (near) { target = localToWorld(V(sign * 0.28, 0.95, 0.3)).lerp(new THREE.Vector3().copy(p.reach), Math.pow(u, 0.6)); aim = [ALONG, bodyDir(V(-sign * 0.6, -0.8, 0))]; bend = 0.25; shape = OPEN; rate = 34; }
+        else { target = localToWorld(V(sign * 0.46, 1.02, -0.05)); aim = [ALONG, bodyDir(V(-sign * 0.4, -0.3, 0.85))]; bend = 0.3; shape = HALF_OPEN; rate = 14; }
       } else if (p.jump > 0.03 && !owns) {
         // In the air without the ball: the nearer hand goes and gets it, the
         // other trails. With nothing to reach for, both go straight up.
         const nearest = localToWorld(V(sign * 0.2, 1.6, 0)).distanceTo(ball) <= localToWorld(V(-sign * 0.2, 1.6, 0)).distanceTo(ball);
         const reachable = ballGap < 1.5 && ball.y > p.jump + 1.2;
-        if (reachable && (nearest || !shotLive && !rivalGathering)) { target = ball.clone(); target.y = Math.max(target.y, p.jump + 1.7); pitch = -2.95; roll = sign * 0.2; rate = 30; }
-        else if (reachable) { target = localToWorld(V(sign * 0.36, 1.42, 0.12)); pitch = -1.9; }
-        else { target = localToWorld(V(sign * 0.21, 2.26, 0.14)); pitch = -3.0; }
+        // A big, flat hand at the end of a straight arm, palm to the ball.
+        if (reachable && (nearest || !shotLive && !rivalGathering)) { target = ball.clone(); target.y = Math.max(target.y, p.jump + 1.7); aim = [ALONG, bodyDir(V(0, -0.1, 1))]; bend = 0.3; shape = OPEN; rate = 30; }
+        else if (reachable) { target = localToWorld(V(sign * 0.36, 1.42, 0.12)); aim = [ALONG, bodyDir(V(0, -0.5, 0.85))]; bend = 0.3; shape = HALF_OPEN; }
+        else { target = localToWorld(V(sign * 0.21, 2.26, 0.14)); aim = [ALONG, bodyDir(V(0, -0.1, 1))]; bend = 0.25; shape = OPEN; }
         pole = V(sign * 0.55, 1.5, 0.4);
       } else if (loose && ball.y < 1.3 && ballGap < 1.1) {
-        target = ball.clone().add(V(sign * 0.12, 0.02, 0).applyAxisAngle(UP, this.bodyYaw)); pitch = -1.1; rate = 20;
+        target = ball.clone().add(V(sign * 0.12, 0.02, 0).applyAxisAngle(UP, this.bodyYaw)); aim = [ALONG, bodyDir(V(-sign * 0.8, -0.5, 0.2))]; bend = 0.4; shape = ON_BALL; rate = 20;
       } else if (p.stagger) {
-        target = localToWorld(V(sign * 0.62, 0.95 + Math.sin(p.stagger * 12 + sign) * 0.12, 0.22)); pitch = -1.3; rate = 12;
+        target = localToWorld(V(sign * 0.62, 0.95 + Math.sin(p.stagger * 12 + sign) * 0.12, 0.22)); aim = [ALONG, bodyDir(V(0, -1, 0.2))]; bend = 0.35; shape = HALF_OPEN; rate = 12;
       } else if (p.defending && !owns) {
         // Active hands. On the ball: mirror it low with the near hand and take
         // away the pass with the other. On a shot: hand straight up in its face.
         const near = sign * (localToWorld(V(1, 0, 0)).sub(this.root.position).dot(ball.clone().sub(this.root.position))) >= 0;
         if (rivalGathering && ballGap < 2.3 || shotLive && ballGap < 2.3) {
-          if (near) { target = localToWorld(V(sign * 0.16, 2.2, 0.34)); pitch = -3.0; roll = sign * 0.15; rate = 20; pole = V(sign * 0.5, 1.5, 0.45); }
-          else { target = localToWorld(V(sign * 0.36, 1.3, 0.22)); pitch = -1.9; }
+          if (near) { target = localToWorld(V(sign * 0.16, 2.2, 0.34)); aim = [ALONG, bodyDir(V(0, -0.15, 1))]; bend = 0.25; shape = OPEN; rate = 20; pole = V(sign * 0.5, 1.5, 0.45); }
+          else { target = localToWorld(V(sign * 0.36, 1.3, 0.22)); aim = [ALONG, bodyDir(V(-sign * 0.3, -0.5, 0.8))]; bend = 0.3; shape = HALF_OPEN; }
         } else if (rival && ballGap < 2.6) {
           if (near) {
             const toward = ball.clone().sub(localToWorld(V(sign * 0.2, 1.1, 0.1)));
             target = localToWorld(V(sign * 0.3, 0, 0.36)).addScaledVector(V(toward.x, 0, toward.z).normalize(), 0.16);
-            target.y = p.jump + THREE.MathUtils.clamp(ball.y, 0.72, 1.25); pitch = -1.6; roll = -sign * 0.5; rate = 11;
-          } else { target = localToWorld(V(sign * 0.56, 1.5, 0.2)); pitch = -2.6; roll = sign * 0.4; rate = 9; }
-        } else { target = localToWorld(V(sign * 0.5, side === 'R' ? 1.4 : 1.1, 0.26)); pitch = -1.9; rate = 8; }
+            // Low hand: palm up under the dribble. High hand: palm out in the passing lane.
+            target.y = p.jump + THREE.MathUtils.clamp(ball.y, 0.72, 1.25); aim = [ALONG, bodyDir(V(-sign * 0.35, 0.9, 0.25))]; bend = 0.3; shape = OPEN; rate = 11;
+          } else { target = localToWorld(V(sign * 0.56, 1.5, 0.2)); aim = [ALONG, bodyDir(V(-sign * 0.2, -0.1, 1))]; bend = 0.3; shape = OPEN; rate = 9; }
+        } else { target = localToWorld(V(sign * 0.5, side === 'R' ? 1.4 : 1.1, 0.26)); aim = [ALONG, bodyDir(V(-sign * 0.3, -0.3, 0.9))]; bend = 0.3; shape = HALF_OPEN; rate = 8; }
       }
       // Ease the IK in and out against the authored clip underneath.
       const follow = 1 - Math.exp(-dt * rate);
@@ -262,17 +294,28 @@ export class PlayerView {
         if (snap || arm.weight < 0.02) arm.local.copy(local); else arm.local.lerp(local, follow);
         arm.weight += (1 - arm.weight) * (snap ? 1 - Math.exp(-dt * 40) : follow);
         arm.pole.copy(pole);
-        if (pitch !== null) { const k = arm.wrist < 0.02 ? 1 : follow; arm.pitch += (pitch - arm.pitch) * k; arm.roll += (roll - arm.roll) * k; arm.wrist += (1 - arm.wrist) * follow; }
-        else arm.wrist *= Math.exp(-dt * 12);
+        arm.fresh = arm.wrist < 0.02;
+        arm.wrist += ((aim || pitch !== null ? 1 : 0) - arm.wrist) * (aim || pitch !== null ? follow : 1 - Math.exp(-dt * 12));
       } else { arm.weight *= Math.exp(-dt * 11); arm.wrist *= Math.exp(-dt * 11); }
-      if (arm.weight > 0.015) {
-        const goal = localToWorld(arm.local.clone());
-        h.ikArm(side, _current.lerp(goal, arm.weight), localToWorld(arm.pole.clone()));
-        if (arm.wrist > 0.25) {
-          _quat.setFromEuler(_euler.set(arm.pitch, 0, arm.roll, 'XZY'));
-          h.setWorldQuat('hand' + side, _quat.premultiply(this.root.quaternion));
+      if (arm.weight > 0.015) h.ikArm(side, _current.lerp(localToWorld(arm.local.clone()), arm.weight), localToWorld(arm.pole.clone()));
+      // The wrist is set after the arm, because what it can do depends on
+      // where the forearm ended up.
+      if (target && (aim || pitch !== null)) {
+        if (aim) h.aimHand(side, aim[0] === ALONG ? h.worldPos('hand' + side, _fingers).sub(h.worldPos('elbow' + side, _palm)) : aim[0], aim[1], bend, _quat);
+        else {
+          // An authored pitch and roll: the same wrist limits apply.
+          _quat.setFromEuler(_euler.set(pitch, 0, roll, 'XZY')).premultiply(this.root.quaternion);
+          h.aimHand(side, _fingers.set(0, -1, 0).applyQuaternion(_quat), _palm.copy(h.palm(side)).applyQuaternion(_quat), 1.0, _quat);
         }
+        _quat.premultiply(_rootInverse.copy(this.root.quaternion).invert());
+        if (arm.fresh) arm.q.copy(_quat); else arm.q.slerp(_quat, follow);
       }
+      if (arm.wrist > 0.25) h.setWorldQuat('hand' + side, _quat.copy(this.root.quaternion).multiply(arm.q));
+      else h.relaxWrist(side, 0.6);
+      // Fingers ease between shapes a little faster than the arm moves.
+      const fingers = 1 - Math.exp(-dt * 18);
+      arm.open += (shape[0] - arm.open) * fingers; arm.ball += (shape[1] - arm.ball) * fingers;
+      h.setHandShape(side, arm.open, arm.ball);
     }
     h.update();
     if (!firstPerson) {

@@ -7,11 +7,12 @@ from mathutils.kdtree import KDTree
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def add_support_grip(body):
+def mirror_hand_key(body, source, target):
+    """Copy a right-hand shape key onto the left hand as a new key."""
     keys = body.data.shape_keys.key_blocks
     basis = keys['Basis']
-    right = keys['HandGrip']
-    left = keys.get('SupportGrip') or body.shape_key_add(name='SupportGrip',from_mix=False)
+    right = keys[source]
+    left = keys.get(target) or body.shape_key_add(name=target,from_mix=False)
     tree = KDTree(len(basis.data))
     for i, point in enumerate(basis.data):
         tree.insert(point.co, i)
@@ -27,7 +28,11 @@ def add_support_grip(body):
             left.data[i].co += Vector((-delta.x, delta.y, delta.z))
             changed += delta.length > 0.00001
     assert changed > 100, f'Expected actual finger geometry, changed {changed} vertices'
-    print(f'Support-hand grip: {changed} vertices')
+    return changed
+
+
+def add_support_grip(body):
+    print(f"Support-hand grip: {mirror_hand_key(body, 'HandGrip', 'SupportGrip')} vertices")
 
 
 if __name__ == '__main__':

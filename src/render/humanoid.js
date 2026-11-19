@@ -96,6 +96,8 @@ function prepareRig(meta, bin) {
     g.setAttribute('skinIndex', new THREE.BufferAttribute(new Uint16Array(new Uint8Array(bin, p.joints, p.vCount * 4)), 4));
     g.setAttribute('skinWeight', new THREE.BufferAttribute(w, 4));
     g.setIndex(new THREE.BufferAttribute(new Uint16Array(bin.slice(p.idx, p.idx + p.iCount * 2)), 1));
+    // Hand shapes are stored sparsely; shapesFor() spreads them over a merged mesh.
+    if (p.morph) g.userData.shapes = p.morph.map((m) => ({ idx: new Uint16Array(bin.slice(m.idx, m.idx + m.count * 2)), pos: new Int16Array(bin.slice(m.pos, m.pos + m.count * 6)), nrm: new Int8Array(bin, m.nrm, m.count * 3) }));
     return { name: p.name, optional: !!p.optional, geo: g };
   }));
   // The shoe soles: how far below the ankle joint the lowest sole vertex is
@@ -127,8 +129,17 @@ function prepareRig(meta, bin) {
       if (w > 0.5) toe = Math.max(toe, P.getZ(v) - J.ankleL.z);
     }
   }
+  // Which way each palm faces, in its hand bone's space: closing the fingers
+  // round a ball moves them toward the palm, square to the line of the hand.
+  const palm = {};
+  for (const side of ['L', 'R']) {
+    const body = lods[0].find((p) => p.geo.userData.shapes), t = (meta.shapes || []).indexOf('ball' + side), sum = new THREE.Vector3();
+    if (body && t >= 0) { const s = body.geo.userData.shapes[t]; for (let k = 0; k < s.pos.length; k += 3) sum.add(d.set(s.pos[k], s.pos[k + 1], s.pos[k + 2])); }
+    sum.applyQuaternion(bindQ['hand' + side].clone().invert()); sum.y = 0;
+    palm[side] = sum.lengthSq() > 0 ? sum.normalize() : new THREE.Vector3(0, 0, 1);
+  }
   const floor = canon.ankleL.y - sole;
-  return { sole, toe, floor, bones: meta.bones, index: Object.fromEntries(meta.bones.map((b, i) => [b, i])), J, canon, bindQ, inverses, lods, headCentre: new THREE.Vector3(...meta.headCentre), headSize: new THREE.Vector3(...(meta.headSize || [0.1, 0.14, 0.125])), skull: meta.skull, geoCache: new Map() };
+  return { sole, toe, floor, palm, bones: meta.bones, index: Object.fromEntries(meta.bones.map((b, i) => [b, i])), J, canon, bindQ, inverses, lods, shapes: meta.shapes || [], shapeScale: meta.shapeScale || 20000, headCentre: new THREE.Vector3(...meta.headCentre), headSize: new THREE.Vector3(...(meta.headSize || [0.1, 0.14, 0.125])), skull: meta.skull, geoCache: new Map() };
 }
 
 // ---- gear: pieces authored in a bone's canonical local frame ----
@@ -168,12 +179,26 @@ function gearPart(list, geom, bone, color, pos = [0, 0, 0], rot = null, scale = 
   g.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
   list.push(g);
 }
+// Give a mesh that contains the body (its vertices starting at `offset`) the
+// hand shapes as relative morph targets, in RIG.shapes order.
+function shapesFor(g, body, offset = 0) {
+  const sparse = body.userData.shapes; if (!sparse) return g;
+  const count = g.attributes.position.count, positions = [], normals = [];
+  RIG.shapes.forEach((name, t) => {
+    const pos = new Float32Array(count * 3), nrm = new Float32Array(count * 3), s = sparse[t];
+    for (let k = 0; k < s.idx.length; k++) for (let c = 0; c < 3; c++) { pos[(offset + s.idx[k]) * 3 + c] = s.pos[k * 3 + c] / RIG.shapeScale; nrm[(offset + s.idx[k]) * 3 + c] = s.nrm[k * 3 + c] / 64; }
+    const a = new THREE.BufferAttribute(pos, 3), b = new THREE.BufferAttribute(nrm, 3); a.name = b.name = name; positions.push(a); normals.push(b);
+  });
+  g.morphAttributes.position = positions; g.morphAttributes.normal = normals; g.morphTargetsRelative = true;
+  return g;
+}
 function geometryFor(o, lod) {
   const key = `${lod}|${o.headgear}|${o.pads ? 1 : 0}|${o.gloves ? 1 : 0}|${o.keeper ? 1 : 0}`;
   let g = RIG.geoCache.get(key);
   if (!g) {
     const parts = RIG.lods[lod].filter((p) => !p.optional).map((p) => p.geo);
     g = mergeGeometries([...parts, ...buildGear(RIG, gearPart, o, lod)], false);
+    let offset = 0; for (const part of parts) { if (part.userData.shapes) { shapesFor(g, part, offset); break; } offset += part.attributes.position.count; }
     RIG.geoCache.set(key, g);
   }
   return g;
@@ -200,7 +225,7 @@ function armGeometry() {
   }
   const g = new THREE.BufferGeometry();
   for (const [name, buffer] of Object.entries(body.attributes)) g.setAttribute(name, buffer);
-  g.setIndex(indices);
+  g.setIndex(indices); shapesFor(g, body);
   RIG.geoCache.set(key, g);
   return g;
 }
@@ -505,6 +530,7 @@ function kitMaterial(shared = null, depth = false) {
 }
 
 const DOWN = new THREE.Vector3(0, -1, 0);
+const _wf = new THREE.Vector3(), _wv = new THREE.Vector3(), _wt = new THREE.Vector3(), _wF = new THREE.Vector3(), _wN = new THREE.Vector3(), _wm = new THREE.Matrix4(), _wq = new THREE.Quaternion(), _wq2 = new THREE.Quaternion();
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _S = new THREE.Vector3(), _E = new THREE.Vector3(),
   _T = new THREE.Vector3(), _dir = new THREE.Vector3(), _pv = new THREE.Vector3(), _end = new THREE.Vector3();
 const _pq = new THREE.Quaternion(), _eul = new THREE.Euler(), _bq = new THREE.Quaternion();
@@ -574,6 +600,46 @@ export class Humanoid {
     const u = this.material.userData.uniforms, side = s => (s === 'L' ? 1 : s === 'R' ? -1 : 0);
     u.uGear.value.set(side(sleeve), side(leg), headband ? 1 : 0, wristbands ? 1 : 0);
     u.uGearColor.value.setHex(color); u.uShoe.value.setHex(shoe); u.uFade.value = fade;
+  }
+
+  // Shape of a hand: open (0 relaxed .. 1 flat and spread) and ball (0 .. 1
+  // spread wide round a basketball). The rest hand is the relaxed one.
+  setHandShape(side, open = 0, ball = 0) {
+    const m = this.mesh.morphTargetInfluences, d = this.mesh.morphTargetDictionary; if (!m || !d) return;
+    if (d['open' + side] !== undefined) m[d['open' + side]] = open;
+    if (d['ball' + side] !== undefined) m[d['ball' + side]] = ball;
+  }
+
+  // Point a hand: fingers along `fingers`, palm facing `palm` (world space),
+  // as far as a wrist allows. From the line of the forearm a wrist bends up to
+  // `limit` radians toward the palm or the back of the hand, and only a little
+  // sideways; it turns freely about the forearm.
+  aimHand(side, fingers, palm, limit = 1.15, out = null) {
+    const fore = this.worldPos('hand' + side, _wf).sub(this.worldPos('elbow' + side, _wv)).normalize();
+    const F = _wF.copy(fingers).normalize(), N = _wN.copy(palm);
+    // The palm's direction, square to the forearm: the plane the wrist flexes in.
+    const flexAxis = _wv.copy(N).addScaledVector(fore, -N.dot(fore));
+    if (flexAxis.lengthSq() > 1e-4) {
+      flexAxis.normalize(); const sideAxis = _wt.crossVectors(fore, flexAxis);
+      const flex = THREE.MathUtils.clamp(Math.atan2(F.dot(flexAxis), F.dot(fore)), -limit, limit), sideways = THREE.MathUtils.clamp(Math.asin(THREE.MathUtils.clamp(F.dot(sideAxis), -1, 1)), -0.35, 0.35);
+      F.copy(fore).multiplyScalar(Math.cos(flex)).addScaledVector(flexAxis, Math.sin(flex)).multiplyScalar(Math.cos(sideways)).addScaledVector(sideAxis, Math.sin(sideways)).normalize();
+    } else if (fore.angleTo(F) > limit) F.copy(fore).lerp(F, limit / fore.angleTo(F)).normalize();
+    N.addScaledVector(F, -N.dot(F));
+    if (N.lengthSq() < 1e-6) N.set(0, 1, 0).addScaledVector(F, -F.y);
+    N.normalize();
+    // Rest hand: fingers along -Y, palm along RIG.palm (bone space).
+    const local = RIG.palm[side];
+    _wm.makeBasis(_wt.crossVectors(N, F), _wv.copy(F).negate(), N); _wq.setFromRotationMatrix(_wm);
+    _wm.makeBasis(_wt.set(0, -1, 0).cross(local).negate(), _wv.set(0, 1, 0), local); _wq.multiply(_wq2.setFromRotationMatrix(_wm).invert());
+    if (out) return out.copy(_wq);
+    this.setWorldQuat('hand' + side, _wq); return _wq;
+  }
+  // Which way the palm faces, in the hand bone's own space.
+  palm(side) { return RIG.palm[side]; }
+  // The same limits applied to whatever orientation a hand already has.
+  relaxWrist(side, limit = 0.7) {
+    this.bones['hand' + side].getWorldQuaternion(_wq2);
+    this.aimHand(side, _wF.set(0, -1, 0).applyQuaternion(_wq2), _wN.copy(RIG.palm[side]).applyQuaternion(_wq2), limit);
   }
 
   // Shirt number (0 = none) and the lettering that carries it (kitprint.js).

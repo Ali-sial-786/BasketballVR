@@ -10,7 +10,8 @@
 //    of its `playful_head` interchange scale, retaining adult facial anatomy),
 //    fits an athletic head/body ratio; lengthens the upper arm and forearm
 //    (joints and skin together) to adult proportions.
-//  * Hands: a relaxed, slightly curled hand from the source's grip morphs.
+//  * Hands: the source's relaxed rest hand, plus posed shapes (open, on the
+//    ball) for each hand as sparse morph targets.
 //  * Basketball kit: exact armhole/neckline clipping for a bound sleeveless
 //    jersey, original tailored shorts, full bare-leg anatomy and court shoes.
 //  * Fidelity: source normals are kept (only welded where they agree), each
@@ -87,7 +88,6 @@ const si = Object.fromEntries(SRC.map((n, i) => [n, i]));
 const HEAD_ANCHOR = SJ.head.slice();           // Courtside's playful_head pivot (neck01 joint)
 const HEAD_K = 0.92;                           // sporty head, ~1.2x life once the body is life size
 const ARM_UPPER = 1.18, ARM_FORE = 1.04;       // adult limb proportions (MakeHuman's upper arm is short)
-const RELAX = 0.34;                            // grip morph amount for a relaxed, curled hand
 
 // Inverse of Courtside's playful_head scale (Blender Z-up -> glTF Y-up:
 // bx = x, by = -z, bz = y). Forward: t = smooth((pz - 1.49)/0.10) * w,
@@ -138,9 +138,13 @@ function armMove(p, w) {        // w: Float32Array(NS) weights
 // A part: { name, pos[], nrm[], w Float32Array(V*NS), kit[], col[], idx[] }
 const KIT = { fixed: 0, shirt: 1, trim: 2, headgear: 3, trousers: 4, skin: 5, hair: 6, panel: 7, lips: 8, eyes: 9 };
 const matColor = (m) => gltf.materials[m].pbrMetallicRoughness.baseColorFactor.slice(0, 3).map((c) => Math.pow(c, 1 / 2.2));
-const MORPH = { HandGrip: RELAX, SupportGrip: RELAX };
+// The source's rest hand is a relaxed one and is used as it is. The posed hand
+// shapes ride along as morph targets, per hand, for the game to blend.
+const MORPH = {};
+const HAND_SHAPES = ['openL', 'openR', 'ballL', 'ballR'];
+const SHAPE_SOURCE = { HandOpenL: 'openL', HandOpen: 'openR', HandBallL: 'ballL', HandBall: 'ballR' };
 
-function newPart(name) { return { name, pos: [], nrm: [], w: [], kit: [], col: [], idx: [] }; }
+function newPart(name) { return { name, pos: [], nrm: [], w: [], kit: [], col: [], idx: [], morph: [] }; }
 function loadMesh(meshName, kitFn, triKeep = null, dropBones = null) {
   const mesh = gltf.meshes.find((m) => m.name === meshName);
   const names = (mesh.extras && mesh.extras.targetNames) || [];
@@ -150,6 +154,7 @@ function loadMesh(meshName, kitFn, triKeep = null, dropBones = null) {
     const jn = acc(prim.attributes.JOINTS_0), jw = acc(prim.attributes.WEIGHTS_0), idx = acc(prim.indices);
     const morph = new Float64Array(pos.length);
     (prim.targets || []).forEach((t, ti) => { const a = MORPH[names[ti]]; if (!a || t.POSITION == null) return; const d = acc(t.POSITION); for (let k = 0; k < pos.length; k++) morph[k] += d[k] * a; });
+    const shapes = HAND_SHAPES.map((shape) => { const ti = names.findIndex((x) => SHAPE_SOURCE[x] === shape), t = ti >= 0 && prim.targets ? prim.targets[ti] : null; return t && t.POSITION != null ? acc(t.POSITION) : null; });
     const base = part.pos.length / 3, col = matColor(prim.material), mat = gltf.materials[prim.material].name;
     const nv = pos.length / 3;
     for (let v = 0; v < nv; v++) {
@@ -171,8 +176,16 @@ function loadMesh(meshName, kitFn, triKeep = null, dropBones = null) {
       p = reHead(u.p, wh);
       n = norm([n[0] / u.s[0], n[1] / u.s[1], n[2] / u.s[2]]);   // inverse-transpose of the (diagonal) scale
       p = add(p, [morph[v * 3], morph[v * 3 + 1], morph[v * 3 + 2]]);
+      // Hand shapes: where this vertex goes in each, relative to its rest position.
+      let shaped = null;
+      shapes.forEach((d, t) => {
+        if (!d) return;
+        const dv = [d[v * 3], d[v * 3 + 1], d[v * 3 + 2]];
+        if (len(dv) < 1e-6) return;
+        (shaped ||= new Float32Array(HAND_SHAPES.length * 3)).set(sub(armMove(add(p, dv), w), armMove(p, w)), t * 3);
+      });
       p = armMove(p, w);
-      part.pos.push(...p); part.nrm.push(...n); part.w.push(w);
+      part.pos.push(...p); part.nrm.push(...n); part.w.push(w); part.morph.push(shaped);
       const k = kitFn(p, mat, w);
       part.kit.push(k); part.col.push(...col);
     }
@@ -189,7 +202,7 @@ function loadMesh(meshName, kitFn, triKeep = null, dropBones = null) {
 }
 function compact(part) {
   const used = new Map(), out = newPart(part.name);
-  Object.assign(out, { ...part, pos: [], nrm: [], w: [], kit: [], col: [], idx: [] });
+  Object.assign(out, { ...part, pos: [], nrm: [], w: [], kit: [], col: [], idx: [], morph: [] });
   for (const v of part.idx) {
     let id = used.get(v);
     if (id === undefined) {
@@ -197,6 +210,7 @@ function compact(part) {
       out.pos.push(part.pos[v * 3], part.pos[v * 3 + 1], part.pos[v * 3 + 2]);
       out.nrm.push(part.nrm[v * 3], part.nrm[v * 3 + 1], part.nrm[v * 3 + 2]);
       out.w.push(part.w[v]); out.kit.push(part.kit[v]); out.col.push(part.col[v * 3], part.col[v * 3 + 1], part.col[v * 3 + 2]);
+      out.morph.push(part.morph?.[v] ?? null);
     }
     out.idx.push(id);
   }
@@ -204,7 +218,7 @@ function compact(part) {
 }
 const P3 = (part, v) => [part.pos[v * 3], part.pos[v * 3 + 1], part.pos[v * 3 + 2]];
 const N3 = (part, v) => [part.nrm[v * 3], part.nrm[v * 3 + 1], part.nrm[v * 3 + 2]];
-function pushV(part, p, n, w, kit, col = [1, 1, 1]) { part.pos.push(...p); part.nrm.push(...n); part.w.push(w); part.kit.push(kit); part.col.push(...col); return part.pos.length / 3 - 1; }
+function pushV(part, p, n, w, kit, col = [1, 1, 1], morph = null) { part.pos.push(...p); part.nrm.push(...n); part.w.push(w); part.kit.push(kit); part.col.push(...col); part.morph.push(morph); return part.pos.length / 3 - 1; }
 function wOf(map) { const w = new Float32Array(NS); let s = 0; for (const [k, v] of Object.entries(map)) { w[si[k]] += v; s += v; } for (let i = 0; i < NS; i++) w[i] /= s || 1; return w; }
 function smoothNormals(part, from = 0) {
   const n = new Float64Array(part.pos.length);
@@ -373,7 +387,7 @@ function paint(part, regions) {
     const poly = [vtx(part.idx[k]), vtx(part.idx[k + 1]), vtx(part.idx[k + 2])];
     process(poly, poly[0].k, 0);
   }
-  Object.assign(part, { pos: out.pos, nrm: out.nrm, w: out.w, kit: out.kit, col: out.col, idx: out.idx });
+  Object.assign(part, { pos: out.pos, nrm: out.nrm, w: out.w, kit: out.kit, col: out.col, idx: out.idx, morph: out.morph });
 }
 // Shirt: bound neckline and armholes (trim). The wordmark, name and numbers
 // are printed onto the cloth at run time (src/render/kitprint.js), so the back
@@ -418,7 +432,7 @@ function weld(part) {
   for (let v = 0; v < part.pos.length / 3; v++) {
     const k = [...P3(part, v).map((x) => Math.round(x * 2e4)), ...N3(part, v).map((x) => Math.round(x * 40)), part.kit[v], ...part.col.slice(v * 3, v * 3 + 3).map((x) => Math.round(x * 50))].join(',');
     let id = map.get(k);
-    if (id === undefined) { id = pushV(out, P3(part, v), N3(part, v), part.w[v], part.kit[v], part.col.slice(v * 3, v * 3 + 3)); map.set(k, id); }
+    if (id === undefined) { id = pushV(out, P3(part, v), N3(part, v), part.w[v], part.kit[v], part.col.slice(v * 3, v * 3 + 3), part.morph?.[v] ?? null); map.set(k, id); }
     rm[v] = id;
   }
   for (const i of part.idx) out.idx.push(rm[i]);
@@ -508,6 +522,20 @@ function transferAO(dst, srcPart) {
 lod1.forEach((p) => transferAO(p, lod0.find((q) => q.name === p.name)));
 
 // ------------------------------------------------------------------ write
+const MORPH_SCALE = 20000;          // position deltas are stored in 1/20 mm
+// Smooth vertex normals for a part with its vertices at `positions` (or at rest),
+// shared across vertices that sit at the same rest position.
+function shapeNormals(part, positions) {
+  const P = positions || part.pos, count = part.pos.length / 3, sum = new Map(), keyOf = (v) => `${Math.round(part.pos[v * 3] * 2e4)},${Math.round(part.pos[v * 3 + 1] * 2e4)},${Math.round(part.pos[v * 3 + 2] * 2e4)}`;
+  const keys = Array.from({ length: count }, (_, v) => keyOf(v)), at = (v) => [P[v * 3], P[v * 3 + 1], P[v * 3 + 2]];
+  for (let k = 0; k < part.idx.length; k += 3) {
+    const a = part.idx[k], b = part.idx[k + 1], c = part.idx[k + 2], fn = cross(sub(at(b), at(a)), sub(at(c), at(a)));
+    for (const v of [a, b, c]) { const s = sum.get(keys[v]) || [0, 0, 0]; s[0] += fn[0]; s[1] += fn[1]; s[2] += fn[2]; sum.set(keys[v], s); }
+  }
+  const out = new Float64Array(count * 3);
+  for (let v = 0; v < count; v++) out.set(norm(sum.get(keys[v]) || [0, 1, 0]), v * 3);
+  return out;
+}
 const chunks = []; let offset = 0;
 const push = (typed) => { const b = Buffer.from(typed.buffer, typed.byteOffset, typed.byteLength); const pad = (4 - (b.length % 4)) % 4; chunks.push(b, Buffer.alloc(pad)); const o = offset; offset += b.length + pad; return o; };
 const lods = [];
@@ -526,7 +554,23 @@ for (const L of [lod0, lod1]) {
       for (let c = 0; c < 4; c++) { jb[v * 4 + c] = t.j[c]; wb[v * 4 + c] = Math.round(t.w[c] * 255); s8 += wb[v * 4 + c]; }
       wb[v * 4] += 255 - s8;
     }
-    parts.push({ name: p.name, vCount: vc, iCount: p.idx.length,
+    // Hand shapes, sparse: only the vertices a shape moves (or whose shading it changes).
+    let morph;
+    if (p.morph.some(Boolean)) {
+      const rest = shapeNormals(p, null);
+      morph = HAND_SHAPES.map((_, t) => {
+        const moved = Float64Array.from(p.pos);
+        p.morph.forEach((m, v) => { if (m) for (let c = 0; c < 3; c++) moved[v * 3 + c] += m[t * 3 + c]; });
+        const posed = shapeNormals(p, moved), ids = [], dp = [], dn = [];
+        for (let v = 0; v < vc; v++) {
+          const m = p.morph[v], d = m ? [m[t * 3], m[t * 3 + 1], m[t * 3 + 2]] : [0, 0, 0], n = [posed[v * 3] - rest[v * 3], posed[v * 3 + 1] - rest[v * 3 + 1], posed[v * 3 + 2] - rest[v * 3 + 2]];
+          if (len(d) < 2e-5 && len(n) < 0.03) continue;
+          ids.push(v); dp.push(...d.map((x) => Math.round(x * MORPH_SCALE))); dn.push(...n.map((x) => Math.round(clamp(x, -1.98, 1.98) * 64)));
+        }
+        return { count: ids.length, idx: push(Uint16Array.from(ids)), pos: push(Int16Array.from(dp)), nrm: push(Int8Array.from(dn)) };
+      });
+    }
+    parts.push({ name: p.name, vCount: vc, iCount: p.idx.length, ...(morph ? { morph } : {}),
       pos: push(Float32Array.from(p.pos)), nrmKit: push(nb), col: push(cb), joints: push(jb), weights: push(wb), idx: push(Uint16Array.from(p.idx)) });
   }
   lods.push({ parts, tris: parts.reduce((s, p) => s + p.iCount / 3, 0) });
@@ -550,6 +594,7 @@ const round = (a) => a.map((x) => Math.round(x * 1e5) / 1e5);
 fs.writeFileSync(path.join(outDir, 'athlete.json'), JSON.stringify({
   source: 'Courtside Athlete.glb (MakeHuman HM08 derived, CC0-1.0)', bones: BONES,
   joints: Object.fromEntries(Object.entries(joints).map(([k, v]) => [k, round(v)])),
+  shapes: HAND_SHAPES, shapeScale: MORPH_SCALE,
   headCentre: round(headCentre), headSize: round(headSize), skull: { c: round(skullC), r: round(skullR) }, headTop: Math.round(capB[4] * 1e4) / 1e4,
   eyeY: Math.round((eyeB[1] + eyeB[4]) / 2 * 1e4) / 1e4, chinY: Math.round(chinB[1] * 1e4) / 1e4, kit: KIT, lods,
 }));
