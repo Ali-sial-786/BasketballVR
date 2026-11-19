@@ -67,7 +67,9 @@ test('eyes align with their sockets, shoe surfaces face out, and concealed feet 
     return v;
   };
   const centerY = v => (Math.min(...v.map(p => p.y)) + Math.max(...v.map(p => p.y))) / 2;
-  assert(Math.abs(centerY(vertices('Details_Sclera')) - centerY(vertices('Details_Iris'))) < 0.003);
+  // Two eyeballs, mirror images of each other, level, at the eyes' landmark height.
+  const eyes = vertices('Details_Eyes'), side = s => eyes.filter(p => Math.sign(p.x) === s), midX = v => (Math.min(...v.map(p => p.x)) + Math.max(...v.map(p => p.x))) / 2;
+  assert(Math.abs(midX(side(1)) + midX(side(-1))) < 0.001 && Math.abs(centerY(side(1)) - centerY(side(-1))) < 0.001 && Math.abs(centerY(eyes) - meta.eyeY) < 0.003);
   assert(vertices('Athlete_Body').every(p => p.y > 0.25));
   const top = vertices('Details_Shoe').filter(p => p.z > 0.13 && p.y > 0.07 && p.y < 0.13);
   assert(top.length > 10); assert(top.reduce((sum, p) => sum + p.ny, 0) / top.length > 0.15);

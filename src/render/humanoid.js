@@ -1,6 +1,7 @@
 // Basketball athletes adapted from Crease VR: adult-proportioned, CC0
-// MakeHuman anatomy, 56k / 9k triangle LODs, 17-bone skinning, baked AO,
-// team colors, modeled faces/fingers and analytic two-bone IK.
+// MakeHuman anatomy, 60k / 9k triangle LODs, 17-bone skinning, baked AO,
+// team colors, photographed skin, eyes, brows and hair (CC0 MakeHuman
+// textures), modeled fingers and analytic two-bone IK.
 //
 // Canonical pose used by all animation code: standing, arms hanging straight
 // down, facing +Z, every bone's local rotation = identity, limbs along -Y.
@@ -23,8 +24,8 @@ export const BASE_SCALE = 1.0;             // the model is a life-size 1.80 m at
 export function handGeometry(side = 'R') {
   const name = 'hand' + side, index = RIG.index[name];
   const g = RIG.lods[0].find(p => p.name === 'Athlete_Body').geo;
-  const p = g.attributes.position, n = g.attributes.normal, si = g.attributes.skinIndex, sw = g.attributes.skinWeight;
-  const positions = [], normals = [], q = RIG.bindQ[name].clone().invert(), v = new THREE.Vector3(), normal = new THREE.Vector3();
+  const p = g.attributes.position, n = g.attributes.normal, t = g.attributes.uv, si = g.attributes.skinIndex, sw = g.attributes.skinWeight;
+  const positions = [], normals = [], uvs = [], q = RIG.bindQ[name].clone().invert(), v = new THREE.Vector3(), normal = new THREE.Vector3();
   for (let i = 0; i < g.index.count; i += 3) {
     const ids = [g.index.getX(i), g.index.getX(i + 1), g.index.getX(i + 2)];
     const weights = ids.map(id => { let w = 0; for (let k = 0; k < 4; k++) if (si.getComponent(id, k) === index) w += sw.getComponent(id, k); return w; });
@@ -32,13 +33,42 @@ export function handGeometry(side = 'R') {
     for (const id of ids) {
       v.fromBufferAttribute(p, id).sub(RIG.J[name]).applyQuaternion(q); positions.push(v.x, v.y, v.z);
       normal.fromBufferAttribute(n, id).applyQuaternion(q); normals.push(normal.x, normal.y, normal.z);
+      uvs.push(t.getX(id), t.getY(id));             // (the skin textures' body layout: see skinMaterial)
     }
   }
   const out = new THREE.BufferGeometry(); out.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3)); out.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  out.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   out.rotateX(Math.PI / 2); return out;
 }
 
 export const SKIN_TONES = [0xf3cfae, 0xe0b088, 0xc68e62, 0x9a6a46, 0x6b4630];
+// Photographed skin (CC0 MakeHuman 1.1 textures, tools/build_skin_textures.py):
+// a body texture and a full-density face texture per source photo. `tone` is
+// the photo's own cheek colour (sRGB): a player's skin colour is reached by
+// tinting toward it from the nearest photo, so every player keeps real pores,
+// lips, lids and stubble whatever his tone. Shared by every player that uses it.
+export const SKIN_MAPS = { light: { tone: 0xe0a686, body: null, face: null }, dark: { tone: 0x593826, body: null, face: null } };
+const blankWhite = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1); blankWhite.needsUpdate = true;
+const FACE = { hair: blankWhite, detail: blankWhite, on: false };
+// Hand over the loaded textures (pipeline.js loadLook().skin) before athletes are made.
+// Anything missing leaves the vertex-coloured skin in place.
+export function setSkinMaps(maps) {
+  if (!maps) return;
+  for (const name of Object.keys(SKIN_MAPS)) if (maps[name]?.body && maps[name]?.face) Object.assign(SKIN_MAPS[name], { body: maps[name].body, face: maps[name].face });
+  if (maps.hair && maps.detail) Object.assign(FACE, { hair: maps.hair, detail: maps.detail });
+  FACE.on = !!(maps.hair && maps.detail && Object.values(SKIN_MAPS).every((m) => m.body && m.face));
+}
+// The photo for a skin colour: the dark-skinned one below a mid brown.
+export function skinMapFor(hex) { const c = new THREE.Color(hex); return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b < 0.2 ? 'dark' : 'light'; }
+// A standalone material with the photographed skin for meshes cut from the
+// body (handGeometry keeps its uvs): the body texture tinted to `hex`, or the
+// plain colour when the textures are not loaded.
+export function skinMaterial(hex, params = {}) {
+  const color = new THREE.Color(hex), map = SKIN_MAPS[skinMapFor(hex)], tone = new THREE.Color(map.tone);
+  const m = new THREE.MeshPhysicalMaterial({ roughness: 0.62, metalness: 0, clearcoat: 0.03, ...params });
+  if (FACE.on && map.body) { m.map = map.body; m.color.setRGB(color.r / tone.r, color.g / tone.g, color.b / tone.b); } else m.color.copy(color);
+  return m;
+}
 export const HAIR = [0x1d1510, 0x3b2a1c, 0x5a4330, 0x0e0e0e, 0x8a6a40];
 export const KITS = {     // kit1 shirt, kit2 accents, kit3 headgear, kit4 trousers, panel = shirt panels
   home: { kit1: 0x196b64, kit2: 0xe7d7ac, kit3: 0x173f3e, kit4: 0x164e4a, panel: 0x2c8477 },
@@ -95,6 +125,12 @@ function prepareRig(meta, bin) {
     g.setAttribute('kit', new THREE.BufferAttribute(kit, 2));
     g.setAttribute('skinIndex', new THREE.BufferAttribute(new Uint16Array(new Uint8Array(bin, p.joints, p.vCount * 4)), 4));
     g.setAttribute('skinWeight', new THREE.BufferAttribute(w, 4));
+    // Texture coordinates: the head's UV island at u in [1, 2] (face texture),
+    // the rest of the skin in [0, 1] (body texture); eyes, brows and lashes in
+    // the face atlas. Parts without textures carry zeros (so all parts merge).
+    const uv = new Float32Array(p.vCount * 2);
+    if (p.uv != null) { const ub = new Uint16Array(bin, p.uv, p.vCount * 2), [su, sv] = meta.uvScale || [1, 1]; for (let k = 0; k < p.vCount; k++) { uv[k * 2] = ub[k * 2] / 65535 * su; uv[k * 2 + 1] = ub[k * 2 + 1] / 65535 * sv; } }
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     g.setIndex(new THREE.BufferAttribute(new Uint16Array(bin.slice(p.idx, p.idx + p.iCount * 2)), 1));
     // Hand shapes are stored sparsely; shapesFor() spreads them over a merged mesh.
     if (p.morph) g.userData.shapes = p.morph.map((m) => ({ idx: new Uint16Array(bin.slice(m.idx, m.idx + m.count * 2)), pos: new Int16Array(bin.slice(m.pos, m.pos + m.count * 6)), nrm: new Int8Array(bin, m.nrm, m.count * 3) }));
@@ -177,6 +213,7 @@ function gearPart(list, geom, bone, color, pos = [0, 0, 0], rot = null, scale = 
   g.setAttribute('kit', new THREE.BufferAttribute(kit, 2));
   g.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
   g.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
+  g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(n * 2), 2));
   list.push(g);
 }
 // Give a mesh that contains the body (its vertices starting at `offset`) the
@@ -275,7 +312,9 @@ function hullFor(geo) {
 // depth: the see-through body's depth pre-pass (setGhost), sharing `shared` (the figure's uniforms).
 const KIT_FRAGMENT_HEAD = `
 uniform vec4 uGear; uniform vec3 uGearColor; uniform vec3 uShoe; uniform float uFade; uniform sampler2D uFabric; uniform vec3 uArmE; uniform vec3 uArmW;
-uniform vec3 uKit1; uniform vec3 uKit2; uniform vec3 uKit3; uniform vec3 uPanel; uniform vec3 uSkin;
+uniform vec3 uKit1; uniform vec3 uKit2; uniform vec3 uKit3; uniform vec3 uPanel; uniform vec3 uSkin; uniform vec3 uHair;
+uniform sampler2D uSkinBody; uniform sampler2D uSkinFace; uniform sampler2D uHairMap; uniform sampler2D uDetail; uniform vec3 uSkinTint; uniform float uMaps;
+varying vec2 vTex;
 #define KIT_PRINT_WIDTH ${PRINT.width.toFixed(4)}
 #define KIT_PRINT_HEIGHT ${PRINT.height.toFixed(4)}
 #define KIT_PRINT_BOTTOM ${PRINT.bottom.toFixed(4)}
@@ -289,8 +328,36 @@ float kitNoise(vec3 p) {
 // Detail painted in bind space, where every body region has a fixed address:
 // shoes and socks, hems and stripes, sleeves and bands, and living skin.
 const KIT_FRAGMENT_COLOR = `
-  float kitSlot = vKA.x, gearCloth = 0.0, kitCloth = 0.0, kitTwill = 0.0, kitHeight = 0.0;
+  float kitSlot = vKA.x, gearCloth = 0.0, kitCloth = 0.0, kitTwill = 0.0, kitHeight = 0.0, kitCover = 1.0, kitDetail = 0.5;
   bool kitSkin = (kitSlot > 4.5 && kitSlot < 5.5), kitHair = (kitSlot > 5.5 && kitSlot < 6.5);
+  bool kitLips = (kitSlot > 7.5 && kitSlot < 8.5), kitEyes = (kitSlot > 8.5 && kitSlot < 9.5), kitCards = kitSlot > 9.5;
+  // ---- photographs: skin (body texture, or the face texture for the head's
+  // UV island at u in [1, 2]), eyes and brow/lash cards (face atlas), and the
+  // short hair laid over the scalp (hair texture: strand detail, coverage) on
+  // two shells, the outer one (u in [2, 3]) catching only the curls' tips.
+  // (Gradients are taken here, outside the branches, for textureGrad.)
+  float kitTips = step(2.0, vTex.x);
+  vec2 kitFaceUv = vTex - vec2(1.0 + kitTips, 0.0), kitDx = dFdx(vTex), kitDy = dFdy(vTex);
+  if (uMaps > 0.5) {
+    if (kitSkin || kitLips) {
+      vec3 photo = vTex.x > 1.0 ? textureGrad(uSkinFace, kitFaceUv, kitDx, kitDy).rgb : textureGrad(uSkinBody, vTex, kitDx, kitDy).rgb;
+      diffuseColor.rgb = photo * uSkinTint;
+      // Shaved scalp (a fade, the hairline's edge): the shadow of the stubble where the hair grows.
+      if (kitSkin && vTex.x > 1.0) diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.5 + uHair * 0.3, 0.55 * textureGrad(uHairMap, kitFaceUv, kitDx, kitDy).a);
+    } else if (kitEyes) diffuseColor.rgb = textureGrad(uDetail, vTex, kitDx, kitDy).rgb * 0.85;   // (a living white is never paper white)
+    else if (kitCards) { kitCover = textureGrad(uDetail, vTex, kitDx, kitDy).a; diffuseColor.rgb = uHair * 0.8; }
+    else if (kitHair) {
+      vec2 strands = textureGrad(uHairMap, kitFaceUv, kitDx, kitDy).ra;
+      kitDetail = strands.x; kitCover = strands.y * mix(1.0, smoothstep(0.5, 0.68, kitDetail), kitTips);
+      diffuseColor.rgb = uHair * (0.2 + 1.9 * kitDetail * kitDetail) * (1.0 + 0.25 * kitTips);
+    }
+  } else if (kitEyes) {
+    // (no textures: an iris and pupil drawn from the atlas coordinates)
+    vec2 e = vTex * vec2(2.0, 1.0);
+    float r = min(distance(e, vec2(0.292, 0.297)), distance(e, vec2(0.704, 0.703)));
+    diffuseColor.rgb = mix(mix(vec3(0.01), vec3(0.22, 0.12, 0.05), smoothstep(0.03, 0.035, r)), vec3(0.8, 0.79, 0.76), smoothstep(0.078, 0.086, r));
+  } else if (kitCards) kitCover = 0.0;
+  else if (kitHair) kitCover = 1.0 - kitTips;             // (no textures: the inner shell as a plain cap)
   vec3 bp = vModelP; float arm = abs(bp.x);
   if (kitSlot < 0.5 && bp.y < 0.32 && bp.y > 0.0) {
     if (bp.y < 0.058) diffuseColor.rgb = mix(vec3(0.07, 0.07, 0.08), vec3(0.86, 0.84, 0.78), smoothstep(0.044, 0.05, bp.y));       // outsole, midsole
@@ -358,14 +425,17 @@ const KIT_FRAGMENT_COLOR = `
   }
   if (kitBinding) { kitCloth = 1.0; kitRib = 1.0; }
   if (kitSkin) {
-    // Skin is never one colour: broad mottling, fine grain, and a little more
-    // blood in the knees, elbows, knuckles, ears and nose.
-    float broad = kitNoise(bp * 26.0), fine = kitNoise(bp * 150.0);
-    diffuseColor.rgb *= 1.0 + (broad - 0.5) * 0.09 + (fine - 0.5) * 0.05;
+    // Untextured skin is never one colour: broad mottling and fine grain (the
+    // photographs carry their own). Exertion: a little more blood in the
+    // knees, elbows, knuckles, ears and nose.
+    if (uMaps < 0.5) {
+      float broad = kitNoise(bp * 26.0), fine = kitNoise(bp * 150.0);
+      diffuseColor.rgb *= 1.0 + (broad - 0.5) * 0.09 + (fine - 0.5) * 0.05;
+    }
     float flush = (1.0 - smoothstep(0.03, 0.09, abs(bp.y - 0.5))) * step(arm, 0.3)
       + (1.0 - smoothstep(0.02, 0.06, abs(arm - 0.36))) * step(1.0, bp.y) * step(bp.y, 1.26)
       + smoothstep(0.52, 0.56, arm) * 0.6 + smoothstep(0.075, 0.09, arm) * step(1.6, bp.y) * step(bp.y, 1.7) + smoothstep(0.155, 0.17, bp.z) * step(1.6, bp.y) * step(bp.y, 1.66);
-    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.12, 0.84, 0.8), clamp(flush, 0.0, 1.0) * 0.45);
+    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.12, 0.84, 0.8), clamp(flush, 0.0, 1.0) * (uMaps > 0.5 ? 0.22 : 0.45));
     // Compression sleeves and bands are painted straight onto the limb.
     float lr = sign(bp.x);
     // (Along the bind-pose forearm: 0 at the elbow, 1 at the wrist.)
@@ -374,10 +444,29 @@ const KIT_FRAGMENT_COLOR = `
     if (uGear.w > 0.5 && limb > 0.5 && along > 0.74 && along < 0.98) gearCloth = 1.0;
     if (uGear.y * lr > 0.5 && bp.y > 0.34 && bp.y < 0.63 && arm < 0.3) gearCloth = 1.0;
   }
-  if (uGear.z > 0.5 && (kitSkin || kitHair) && bp.y > 1.688 && bp.y < 1.722 && arm < 0.12) gearCloth = 1.0;                         // headband
-  // A fade: the hair thins into the skin over the ears and round the back.
-  if (kitHair && uFade > 0.0) diffuseColor.rgb = mix(diffuseColor.rgb, uSkin * 0.82, uFade * (1.0 - smoothstep(1.665, 1.72, bp.y)));
+  // Headband (on the skin a little past where the lifted hair resumes, so no skin shows between them at a slant).
+  if (uGear.z > 0.5 && (kitSkin || kitHair) && bp.y > 1.688 && bp.y < (kitHair ? 1.722 : 1.728) && arm < 0.12) gearCloth = 1.0;
+  // A fade: the hair is cut shorter and shorter down the sides and round the
+  // back, so the strands thin out (the darkest first) into the shaved scalp.
+  if (kitHair && uFade > 0.0) {
+    float low = 1.0 - smoothstep(1.625, 1.712, bp.y);
+    kitCover -= uFade * low * (1.25 - 0.7 * kitDetail);
+    diffuseColor.rgb *= 1.0 - 0.25 * uFade * low;
+  }
   if (gearCloth > 0.5) diffuseColor.rgb = uGearColor * (0.92 + 0.08 * kitNoise(bp * 200.0));
+  if (gearCloth > 0.5 && kitHair) kitCover = 0.0;     // (a headband presses the hair flat: the band is on the skin under it)
+  // Hair and cards are alpha-tested: order-independent, nothing to sort. With
+  // multisampling the coverage is dithered over the samples (alpha to coverage).
+  if (kitHair || kitCards) {
+    #ifdef ALPHA_TO_COVERAGE
+      float cover = kitCards ? clamp(kitCover * 1.5 - 0.05, 0.0, 1.0) : smoothstep(0.38, 0.62, kitCover);
+      if (cover < 0.04) discard;
+    #else
+      float cover = 1.0;
+      if (kitCover < 0.5) discard;
+    #endif
+    diffuseColor.a *= cover;
+  }
   if (gearCloth > 0.5 || (kitSlot > 2.5 && kitSlot < 3.5)) { kitCloth = 1.0; kitRib = 1.0; }
   if (kitRib > 0.0) {
     // Rib knit on bindings, waistband, sleeves and bands.
@@ -415,6 +504,7 @@ const FABRIC = { texture: flatNormal, on: false };
 export function setFabric(texture) { if (texture) { FABRIC.texture = texture; FABRIC.on = true; } }
 function kitMaterial(shared = null, depth = false) {
   const mat = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.78, metalness: 0, clearcoat: 0.035, clearcoatRoughness: 0.48, envMapIntensity: 0.45, sheen: 1, sheenColor: 0x000000, sheenRoughness: 0.45 });
+  mat.alphaToCoverage = !depth;   // (hair and cards; switched off while the figure is see-through or fading)
   if (depth) mat.defines = { GHOST_DEPTH: 1 };
   if (FABRIC.on) mat.defines = { ...mat.defines, KIT_FABRIC: 1 };
   const uniforms = shared || {
@@ -439,6 +529,9 @@ function kitMaterial(shared = null, depth = false) {
     uFabric: { value: FABRIC.texture }, uArmE: { value: RIG.J.elbowL.clone() }, uArmW: { value: RIG.J.handL.clone() },
     uLegIdx: { value: new THREE.Vector3(RIG.index.hipL, RIG.index.kneeL, RIG.index.ankleL) },
     uLegIdxR: { value: new THREE.Vector3(RIG.index.hipR, RIG.index.kneeR, RIG.index.ankleR) },
+    // Photographs (setSkinMaps / Humanoid.setSkinMap): uMaps 0 keeps vertex-coloured skin.
+    uSkinBody: { value: blankWhite }, uSkinFace: { value: blankWhite }, uSkinTint: { value: new THREE.Color(1, 1, 1) },
+    uHairMap: { value: FACE.hair }, uDetail: { value: FACE.detail }, uMaps: { value: FACE.on ? 1 : 0 },
   };
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, uniforms);
@@ -448,16 +541,17 @@ function kitMaterial(shared = null, depth = false) {
         uniform vec2 uHeadBones; uniform vec2 uLegBones; uniform vec2 uHandBones; uniform float uGloved;
         uniform vec3 uKit1; uniform vec3 uKit2; uniform vec3 uKit3; uniform vec3 uKit4; uniform vec3 uSkin; uniform vec3 uHair; uniform vec3 uPanel;
         uniform vec3 uLegIdx; uniform vec3 uLegIdxR;
-        varying float vHeadW; varying float vLegW; varying vec3 vSeg; varying float vHandW; varying vec2 vKA; varying vec3 vModelP;`)
+        varying float vHeadW; varying float vLegW; varying vec3 vSeg; varying float vHandW; varying vec2 vKA; varying vec3 vModelP; varying vec2 vTex;`)
       .replace('#include <color_vertex>', `#include <color_vertex>
         #ifdef USE_COLOR
           float k = kit.x;
-          if (k > 8.5) { /* Preserve authored iris, pupil and sclera colors. */ }
+          if (k > 9.5) vColor.rgb = uHair * 0.8;            // brow and lash cards
+          else if (k > 8.5) { /* eyes: the authored colour (the texture replaces it) */ }
           else if (k > 7.5) vColor.rgb = uSkin * vec3(0.86, 0.72, 0.70);
           else if (k > 6.5) vColor.rgb = uPanel; else if (k > 5.5) vColor.rgb = uHair; else if (k > 4.5) vColor.rgb = uSkin; else if (k > 3.5) vColor.rgb = uKit4;
           else if (k > 2.5) vColor.rgb = uKit3; else if (k > 1.5) vColor.rgb = uKit2; else if (k > 0.5) vColor.rgb = uKit1;
         #endif
-        vKA = kit; vModelP = position;
+        vKA = kit; vModelP = position; vTex = uv;
         vHeadW = 0.0; vLegW = 0.0; vSeg = vec3(0.0); vHandW = 0.0;
         #ifdef USE_SKINNING
           for (int i = 0; i < 4; i++) {
@@ -481,13 +575,21 @@ function kitMaterial(shared = null, depth = false) {
         roughnessFactor = mix(0.88, 0.4 + pore * 0.1 + kitNoise(vModelP * 9.0) * 0.16, clamp(skinSurface, 0.0, 1.0));
         if (vKA.x < 0.5 && vModelP.y < 0.172) roughnessFactor = 0.55;
         float eyeSurface = step(8.5, vKA.x) * step(vKA.x, 9.5);
-        roughnessFactor = mix(roughnessFactor, 0.22, eyeSurface);
+        roughnessFactor = mix(roughnessFactor, 0.3, eyeSurface);
+        if (vKA.x > 5.5 && vKA.x < 6.5) roughnessFactor = 0.62 + 0.25 * (1.0 - kitDetail);     // hair: a soft sheen on the curls
+        if (vKA.x > 9.5) roughnessFactor = 0.6;
         // Polyester knit: a soft, even surface; pressed twill is flatter and tighter.
         if (kitCloth > 0.5) roughnessFactor = mix(0.7 + 0.12 * kitNoise(vModelP * 70.0), 0.5, kitTwill);`)
       .replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
         #ifdef USE_SHEEN
           // The glow of knit cloth at grazing angles, in the colour of the cloth.
           material.sheenColor = (diffuseColor.rgb * 0.5 + 0.12) * kitCloth * (1.0 - 0.6 * kitTwill); material.sheenRoughness = 0.45;
+        #endif
+        // Hair, brows and lashes: fine strands scatter light; no glassy edge on the cards.
+        if (vKA.x > 9.5 || (vKA.x > 5.5 && vKA.x < 6.5)) { material.specularColor *= 0.35; material.specularF90 = 0.35; }
+        #ifdef USE_CLEARCOAT
+          // Eyes: a wet, mirror-smooth film over the iris and the white.
+          if (vKA.x > 8.5 && vKA.x < 9.5) { material.clearcoat = 1.0; material.clearcoatRoughness = 0.06 + geometryRoughness; }
         #endif`)
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>' + KIT_FRAGMENT_NORMAL)
       .replace('#include <color_fragment>', `#include <color_fragment>
@@ -513,7 +615,7 @@ function kitMaterial(shared = null, depth = false) {
           reflectedLight.directDiffuse *= mix(1.0, ao, 0.55);
           float fres = pow(1.0 - clamp(dot(geometryNormal, geometryViewDir), 0.0, 1.0), 2.5);
           vec3 rim = mix(diffuseColor.rgb * 0.6 + vec3(0.04, 0.05, 0.06), diffuseColor.rgb * vec3(1.15, 0.75, 0.6) + vec3(0.05, 0.02, 0.0), skin);
-          reflectedLight.indirectDiffuse += rim * fres * ao * 0.5;
+          reflectedLight.indirectDiffuse += rim * fres * ao * 0.5 * (1.0 - step(8.5, vKA.x));     // (not on the eyes or the cards)
           if (uGhostEdge > 0.0) {
             // see-through body: a dark, solid outline where the surface turns away (pads and boots most)
             float e = smoothstep(0.35, 0.85, 1.0 - clamp(dot(geometryNormal, geometryViewDir), 0.0, 1.0));
@@ -524,7 +626,7 @@ function kitMaterial(shared = null, depth = false) {
           }
         }`);
   };
-  mat.customProgramCacheKey = () => (depth ? 'rimrun-kit-pbr-v5-depth' : 'rimrun-kit-pbr-v5') + (FABRIC.on ? '-knit' : '');
+  mat.customProgramCacheKey = () => (depth ? 'rimrun-kit-pbr-v6-depth' : 'rimrun-kit-pbr-v6') + (FABRIC.on ? '-knit' : '');
   mat.userData.uniforms = uniforms;
   return mat;
 }
@@ -538,7 +640,7 @@ const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const FOOT_ONLY = {}, HAND_ONLY = {};
 
 export class Humanoid {
-  constructor({ team = 'home', skin = null, hair = null, headgear = 'cap', pads = false, gloves = false, keeper = false, scale = 1, seed = 0 } = {}) {
+  constructor({ team = 'home', skin = null, hair = null, headgear = 'cap', pads = false, gloves = false, keeper = false, scale = 1, seed = 0, skinMap = null } = {}) {
     if (!RIG) throw new Error('loadAthlete() must finish before creating players');
     const rnd = (n) => ((Math.sin(seed * 12.9898 + n * 78.233) * 43758.5453) % 1 + 1) % 1;
     this.opts = { headgear, pads, gloves, keeper };
@@ -546,6 +648,7 @@ export class Humanoid {
     const u = this.material.userData.uniforms;
     u.uSkin.value.setHex(skin ?? SKIN_TONES[Math.floor(rnd(1) * SKIN_TONES.length)]);
     u.uHair.value.setHex(hair ?? HAIR[Math.floor(rnd(2) * HAIR.length)]);
+    this.setSkinMap(skinMap);
     const bones = [];
     this.bones = {};
     for (const name of RIG.bones) {
@@ -642,6 +745,19 @@ export class Humanoid {
     this.aimHand(side, _wF.set(0, -1, 0).applyQuaternion(_wq2), _wN.copy(RIG.palm[side]).applyQuaternion(_wq2), limit);
   }
 
+  // Skin photograph: 'light' or 'dark' (SKIN_MAPS), tinted toward this
+  // figure's skin colour; null picks the nearer photo for that colour.
+  setSkinMap(name = null) {
+    const u = this.material.userData.uniforms, skin = u.uSkin.value;
+    name = SKIN_MAPS[name] ? name : skinMapFor(skin.getHex()); this.skinMap = name;
+    const map = SKIN_MAPS[name], tone = new THREE.Color(map.tone), on = FACE.on && map.body && map.face;
+    u.uMaps.value = on ? 1 : 0;
+    u.uSkinBody.value = map.body || blankWhite; u.uSkinFace.value = map.face || blankWhite;
+    // (a little of the tint's saturation is held back: a photo pushed hard toward a tone turns orange)
+    const tint = u.uSkinTint.value.setRGB(skin.r / tone.r, skin.g / tone.g, skin.b / tone.b), grey = 0.2126 * tint.r + 0.7152 * tint.g + 0.0722 * tint.b;
+    tint.setRGB(grey + (tint.r - grey) * 0.85, grey + (tint.g - grey) * 0.85, grey + (tint.b - grey) * 0.85);
+  }
+
   // Shirt number (0 = none) and the lettering that carries it (kitprint.js).
   setNumber(n) { this.number = Math.max(0, Math.min(99, n | 0)); }
   setPrint(texture) { this.material.userData.uniforms.uKitPrint.value = texture || blankPrint; }
@@ -658,7 +774,7 @@ export class Humanoid {
   copyLook(o) {
     const u = this.material.userData.uniforms, v = o.material.userData.uniforms;
     u.uSkin.value.copy(v.uSkin.value); u.uHair.value.copy(v.uHair.value);
-    this.setNumber(o.number);
+    this.setSkinMap(o.skinMap); this.setNumber(o.number);
   }
 
   setArmsOnly(on) {
@@ -689,7 +805,7 @@ export class Humanoid {
     if (!!this.ghost === on) return;
     this.ghost = on;
     const m = this.material, u = m.userData.uniforms;
-    m.transparent = on; m.opacity = 1; m.depthWrite = !on; m.needsUpdate = true;
+    m.transparent = on; m.alphaToCoverage = !on; m.opacity = 1; m.depthWrite = !on; m.needsUpdate = true;
     this.fade = 1;
     u.uNoHead.value = on ? 1 : 0;
     u.uTrunkAlpha.value = 1;
@@ -723,7 +839,7 @@ export class Humanoid {
     if (this.ghost) return;                       // (your see-through body has its own opacities)
     const m = this.material;
     const tr = a < 1;
-    if (m.transparent !== tr) { m.transparent = tr; m.needsUpdate = true; }
+    if (m.transparent !== tr) { m.transparent = tr; m.alphaToCoverage = !tr; m.needsUpdate = true; }
     m.opacity = a;
     for (const x of this.extras || []) x.traverse((o) => {
       if (!o.isMesh) return;

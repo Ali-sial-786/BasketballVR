@@ -37,7 +37,7 @@ for (let i = 0; i < count; i++) {
   if (kit === 6) p = PARTS.hair;
   else if (kit === 8) p = PARTS.lips;
   else if (kit === 4) p = PARTS.trousers;
-  else if (kit >= 1 && kit !== 5) p = PARTS.shirt;                       // jersey, trim, panels, back number
+  else if (kit >= 1 && kit !== 5 && kit !== 9) p = PARTS.shirt;          // jersey, trim, panels, back number (eyes: part of the face below)
   else if (kit === 0) p = bone.startsWith('knee') ? PARTS.leg : PARTS.shoes;   // sock on the shin, shoe on the foot
   else if (bone.startsWith('shoulder')) p = PARTS.upperArm;
   else if (bone.startsWith('elbow')) p = PARTS.forearm;

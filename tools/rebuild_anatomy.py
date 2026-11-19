@@ -2,14 +2,21 @@
 Run: blender -b -t 6 --python tools/rebuild_anatomy.py [-- --preview]
 Inputs are fetched by tools/fetch_anatomy.py. All visible tailoring is
 baked into the exported geometry; the only remaining modifiers are armature skinning.
+The face uses MakeHuman's own CC0 eye, eyebrow and eyelash proxies, fitted with
+their .mhclo files, and the photo textures laid out by tools/face_atlas.json
+(build them first with tools/build_skin_textures.py: the hair shell is cut to
+the coverage of public/assets/textures/hair.png).
 """
 import bpy, bmesh, math, json, random, sys
+import numpy as np
 from mathutils import Vector, Matrix
 from mathutils.bvhtree import BVHTree
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / 'art-sources'
+MH = SRC / 'makehuman'
 OUT = SRC / 'generated'
+LAYOUT = json.loads((ROOT / 'tools' / 'face_atlas.json').read_text())
 OUT.mkdir(parents=True, exist_ok=True)
 bpy.ops.object.select_all(action='SELECT')
 bpy.ops.object.delete(use_global=False)
@@ -27,14 +34,36 @@ for fn, strength in [('male.target', .85), ('athletic.target', .55)]:
         a = line.split()
         if len(a) == 4 and not line.startswith('#'):
             verts[int(a[0])] += Vector(map(float, a[1:])) * strength
+rawverts = [v.copy() for v in verts]   # MakeHuman space, for fitting proxies with their .mhclo files
 
+# The head's UV island moves to [1, 2] x [0, 1], remapped onto the face texture's
+# crop (tools/face_atlas.json): the skin shader samples the full-density face
+# texture there and the 1024 body texture everywhere else.
+def head_island():
+    parent = list(range(len(uvs)))
+    def find(x):
+        while parent[x] != x: parent[x] = parent[parent[x]]; x = parent[x]
+        return x
+    for f in groups['body']:
+        for i, u in f[1:]: parent[find(u)] = find(f[0][1])
+    islands = {}
+    for f in groups['body']: islands.setdefault(find(f[0][1]), set()).update(u for i, u in f)
+    return max(islands.values(), key=lambda ids: max(uvs[u][0] for u in ids))
+_fu0, _fv0, _fu1, _fv1 = LAYOUT['face']['src']
+for u in head_island(): uvs[u] = (1. + (uvs[u][0] - _fu0) / (_fu1 - _fu0), (uvs[u][1] - _fv0) / (_fv1 - _fv0))
+
+# MakeHuman decimetres to metres (Blender Z up). The head keeps MakeHuman's own
+# adult proportions: an earlier stylised build widened the cranium (up to 21%),
+# deepened it (18%) and stretched it (12%) above the jaw, which read as a
+# bulbous skull with wide oval eyes once the face was photo-textured.
+HEAD_WIDEN, HEAD_DEEPEN, HEAD_STRETCH = 0., 0., 1.
 def convert(v):
     x, y, z = v
     y = (y + 8.45) * .10; x *= .10; z *= .10
     if y > 1.54:
         t = min(1., (y-1.54) / .13)
-        x *= 1. + .21*t; z = .045 + (z-.045) * (1.+.18*t)
-        y = 1.54 + (y-1.54)*1.12
+        x *= 1. + HEAD_WIDEN*t; z = .045 + (z-.045) * (1.+HEAD_DEEPEN*t)
+        y = 1.54 + (y-1.54)*HEAD_STRETCH
     return Vector((x, -z, y))
 verts = [convert(v) for v in verts]
 sk = json.loads((SRC / 'skeleton.json').read_text())
@@ -89,10 +118,6 @@ accent = material('Accent',(.72,.84,.43),.72)
 white = material('Shoe',(.83,.86,.84),.73)
 sole = material('Sole',(.35,.40,.41),.85)
 hair = material('Hair',(.031,.018,.013),.78)
-sclera = material('Sclera',(.64,.67,.63),.29)
-iris = material('Iris',(.115,.065,.030),.33)
-pupil = material('Pupil',(.004,.006,.005),.23)
-mouth = material('Mouth',(.075,.028,.024),.82)
 
 def active(obj):
     bpy.ops.object.select_all(action='DESELECT'); obj.select_set(True); bpy.context.view_layer.objects.active = obj
@@ -140,6 +165,62 @@ def recalc(obj, weld=False):
     if weld: bmesh.ops.remove_doubles(bm,verts=list(bm.verts),dist=.00015)
     bmesh.ops.recalc_face_normals(bm,faces=list(bm.faces)); bm.to_mesh(obj.data); bm.free(); obj.data.update()
 
+# ---- face: MakeHuman's own eye, eyebrow and eyelash proxies -------------------
+# Each proxy vertex is a weighted triangle of base-mesh vertices plus an offset
+# scaled by the head's measured size (.mhclo), so the targets above carry them
+# into place exactly as MakeHuman fits them. UVs go into the face atlas.
+def read_obj(path):
+    v,vt,f=[],[],[]
+    for line in path.read_text().splitlines():
+        a=line.split()
+        if not a:continue
+        if a[0]=='v':v.append(Vector(map(float,a[1:4])))
+        elif a[0]=='vt':vt.append(tuple(map(float,a[1:3])))
+        elif a[0]=='f':f.append([(int(q.split('/')[0])-1,int(q.split('/')[1])-1) for q in a[1:]])
+    return v,vt,f
+def fit_proxy(path):
+    scale=[1.,1.,1.];out=[];inside=False
+    for line in path.read_text().splitlines():
+        a=line.split()
+        if not a or a[0].startswith('#'):continue
+        if a[0] in ('x_scale','y_scale','z_scale'):
+            n='xyz'.index(a[0][0]);scale[n]=abs(rawverts[int(a[1])][n]-rawverts[int(a[2])][n])/float(a[3])
+        elif a[0]=='verts':inside=True
+        elif inside and a[0][0].isdigit():
+            if len(a)==1:out.append(rawverts[int(a[0])].copy());continue
+            r=[int(x) for x in a[:3]];w=[float(x) for x in a[3:6]];d=[float(x) for x in a[6:9]] if len(a)>=9 else [0.,0.,0.]
+            out.append(rawverts[r[0]]*w[0]+rawverts[r[1]]*w[1]+rawverts[r[2]]*w[2]+Vector((d[0]*scale[0],d[1]*scale[1],d[2]*scale[2])))
+        else:inside=False
+    return [convert(p) for p in out]
+def atlas_uv(region,uv):
+    (su0,sv0,su1,sv1),(x0,y0,x1,y1)=LAYOUT['atlas'][region]['src'],LAYOUT['atlas'][region]['dst'];W,H=LAYOUT['atlas']['size']
+    s=(uv[0]-su0)/(su1-su0);t=(uv[1]-sv0)/(sv1-sv0)
+    return (x0/W+s*(x1-x0)/W,1.-y1/H+t*(y1-y0)/H)
+def proxy(name,stem,mat,region,keep=lambda f,vt:True):
+    v,vt,f=read_obj(MH/(stem+'.obj'));fitted=fit_proxy(MH/(stem+'.mhclo'))
+    f=[face for face in f if keep(face,vt)]
+    ids=sorted({i for face in f for i,u in face});remap={old:new for new,old in enumerate(ids)}
+    obj=mesh(name,[fitted[i] for i in ids],[[remap[i] for i,u in face] for face in f],mat)
+    layer=obj.data.uv_layers.new(name='UVMap')
+    for poly,face in zip(obj.data.polygons,f):
+        for loop,(_,u) in zip(poly.loop_indices,face):layer.data[loop].uv=atlas_uv(region,vt[u])
+    bind(obj,'head');return obj
+# The eye globes, as fitted (one per side): centre and radius. The globes sit
+# a little back from MakeHuman's fit: smoothing the skin rounds the lid margins
+# back, and the lids must close over the globe with no white below the lower lid.
+EYE_SET_BACK=.0015
+def smooth01(t):t=max(0.,min(1.,t));return t*t*(3.-2.*t)
+def eye_globes():
+    v,vt,f=read_obj(MH/'high-poly.obj');fitted=fit_proxy(MH/'high-poly.mhclo')
+    ball={i for face in f if not all(vt[u][0]>.86 and vt[u][1]<.14 for i,u in face) for i,u in face}
+    out={}
+    for sign in (1,-1):
+        pts=[fitted[i]+Vector((0,EYE_SET_BACK,0)) for i in ball if fitted[i].x*sign>0]
+        r=(max(p.z for p in pts)-min(p.z for p in pts))/2
+        out[sign]=(Vector((sum(p.x for p in pts)/len(pts),min(p.y for p in pts)+r,(max(p.z for p in pts)+min(p.z for p in pts))/2)),r)
+    return out
+GLOBES=eye_globes()
+
 # Skin is retained only where it is visible; no bare toes or concealed anatomy.
 shoulder = joint('upperarm01.L'); arm_direction = (joint('lowerarm01.L')-shoulder).normalized()
 def sleeve_distance(p):
@@ -153,15 +234,25 @@ def exposed(p):
     return p.z > 1.437 and abs(p.x)<.048 and p.y<-.027
 bodyfaces = groups['body']  # Complete anatomy under the basketball armholes and neckline.
 body = source_mesh('Athlete_Body',bodyfaces,skin,auxiliary=True)
-# A BVH of the original continuous skull gives hair/brows a real sculpted surface.
-fullhead = source_mesh('_HeadConstruction',[f for f in groups['body'] if min(verts[i].z for i,u in f)>1.59],skin,'head')
-subdivide(fullhead,1)
-head_bvh = BVHTree.FromPolygons([v.co for v in fullhead.data.vertices],[list(p.vertices) for p in fullhead.data.polygons],all_triangles=False)
-bpy.data.objects.remove(fullhead,do_unlink=True)
+# The unsmoothed skin, for seating eyebrow cards on the smoothed one (below).
+cage_bvh = BVHTree.FromPolygons(verts,[[i for i,u in f] for f in bodyfaces])
 # Retain the adult MakeHuman nose, jaw and neutral mouth; no cartoon face warp.
 subdivide(body,1)
 mod=body.modifiers.new('Baked efficient sculpt topology','DECIMATE');mod.ratio=.56;mod.use_collapse_triangulate=True;bake(body,mod)
 body.data.materials.append(lips)
+# MakeHuman's relaxed lids sit low, over a third of the iris, which reads as
+# sleepy once the eyes are real. Raise each upper lid the way a lid moves: turn
+# it about the globe's centre, the margin most, fading out toward the brow and
+# the corners, so the margin stays on the eyeball.
+LID_LIFT=.13
+for sign,(c,r) in GLOBES.items():
+    for v in body.data.vertices:
+        d=v.co-c;across=abs(d.x)/(r*1.25);up=d.z/r
+        if across>=1. or up<-.15 or d.length>r+.016 or d.y>0.:continue
+        w=(1.-smooth01(across**2))*smooth01((up+.15)/.35)*(1.-smooth01((d.length-r-.004)/.012))
+        if w<=0.:continue
+        v.co=c+Matrix.Rotation(-LID_LIFT*w,3,'X')@d
+body.data.update()
 # Lip pigment is restricted to the actual vermilion rings, below the nose.
 face_shift = joint('eye.L').z - 1.6487
 for poly in body.data.polygons:
@@ -459,31 +550,30 @@ def tube(name,points,radius,mat,bone='head',resolution=2,closed=False):
     for p in obj.data.polygons:p.use_smooth=True
     bind(obj,bone);obj.select_set(False);return obj
 
-def front_surface(x,z,offset=.002):
-    hit=head_bvh.ray_cast(Vector((x,-.50,z)),Vector((0,1,0)),1.)[0]
-    return Vector((x,hit.y-offset if hit else -.15,z))
-blink_lids=[]
-for side in ['.L','.R']:
-    sign=1 if side=='.L' else -1;p=joint('eye'+side)
-    eye=source_mesh('Eye'+side,groups['helper-l-eye' if sign==1 else 'helper-r-eye'],sclera,'head')
-    # Inset anatomical whites leave the lids in front of the globe.
-    for v in eye.data.vertices:
-        delta=v.co-p;v.co=p+Vector((delta.x,delta.y*.986,delta.z));v.co.y+=.0025
-    subdivide(eye,1)
-    # The macro body targets move the eye sockets. Derive the iris from the
-    # actual globe instead of the old character's hard-coded face coordinates.
-    location=Vector((p.x,min(v.co.y for v in eye.data.vertices)-.0007,p.z))
-    sphere('Iris'+side,location,(.0062,.0010,.0062),iris,segments=24,rings=12)
-    sphere('Pupil'+side,location+Vector((0,-.0010,0)),(.0027,.0007,.0029),pupil,segments=20,rings=10)
-    sphere('Catchlight'+side,location+Vector((-.0020,-.00165,.0022)),(.0011,.0004,.0011),white,segments=12,rings=8)
-    lid=sphere('Blink lid'+side,location+Vector((0,-.004,0)),(.023,.0065,.014),skin,segments=24,rings=12)
-    blink_lids.append(lid)
-    browpoints=[front_surface(p.x+sign*dx,p.z+dz,.0018) for dx,dz in [(-.018,.021),(-.006,.025),(.009,.024),(.021,.020)]]
-    tube('Brow'+side,browpoints,.0016,hair)
-
-# A fine neutral lip crease follows the current face, rather than the old
-# stylized mouth coordinates. Keep its pigment subtle at close range.
-tube('MouthOutline',[front_surface(x,1.575+face_shift+.0015*(abs(x)/.028)**1.8,.0008) for x in [-.028,-.021,-.014,-.007,0,.007,.014,.021,.028]],.0006,mouth)
+eyeball=material('Eyeball',(.9,.9,.9),.25)
+browmat=material('Brow',(.03,.02,.015),.7)
+lashmat=material('Lash',(.02,.015,.012),.7)
+# High-poly eyes: each globe is an eyeball plus a clear cornea shell (its UVs
+# sit in the texture's transparent corner). The cornea is left out; the shader
+# gives the globe a wet clear coat instead.
+eyes=proxy('Details_Eyes','high-poly',eyeball,'eye',keep=lambda f,vt:not all(vt[u][0]>.86 and vt[u][1]<.14 for i,u in f))
+for v in eyes.data.vertices:v.co.y+=EYE_SET_BACK
+brows=proxy('Details_Brows','eyebrow001',browmat,'brow')
+lashes=proxy('Details_Lashes','eyelashes01',lashmat,'lash')
+# Lashes are seen from both sides: a reversed copy of every card.
+bm=bmesh.new();bm.from_mesh(lashes.data)
+copy=bmesh.ops.duplicate(bm,geom=list(bm.verts)+list(bm.edges)+list(bm.faces))['geom']
+bmesh.ops.reverse_faces(bm,faces=[g for g in copy if isinstance(g,bmesh.types.BMFace)])
+bm.to_mesh(lashes.data);bm.free();lashes.data.update()
+# The proxies fit the unsmoothed skin; the brows keep their height above it on the smoothed one.
+skin_now=BVHTree.FromPolygons([v.co for v in body.data.vertices],[list(p.vertices) for p in body.data.polygons])
+for v in brows.data.vertices:
+    hit,normal,_,_=cage_bvh.find_nearest(v.co);lift=max(.0004,(v.co-hit).dot(normal)) if hit else .0004
+    hit,normal,_,_=skin_now.find_nearest(v.co)
+    if hit:v.co=hit+normal*lift
+brows.data.update()
+for card in (eyes,brows,lashes):
+    for p in card.data.polygons:p.use_smooth=True
 
 # A folded polo collar and a narrow placket are supported by real fabric geometry.
 neckloop=max(garment_boundaries['Performance_Polo'],key=lambda loop:sum(p.z for p in loop)/len(loop))
@@ -583,38 +673,30 @@ for side in ['.L','.R']:
         tube('Court shoe side seam'+side,[(x+direction*.045,.037,.096),(x+direction*.049,-.038,.101),(x+direction*.054,-.105,.086),(x+direction*.047,-.165,.076)],.0017,accent,'foot'+side,1)
     tube('Heel pull'+side,[(x-.012,.068,.118),(x,.078,.150),(x+.012,.068,.118)],.002,accent,'foot'+side,1)
 
-# A scalp cut from actual anatomy excludes the ears and has a rounded hairline.
-def scalpfield(p):
-    front=max(-1.,min(1.,-(p.y+.038)/.105))
-    cutoff=1.640+.066*max(0.,front)+.030*(1.-abs(front))
-    # A small central widow's peak softens an otherwise perfectly circular fringe.
-    cutoff-=.004*math.exp(-(p.x/.027)**2)*max(0.,front)
-    return p.z-cutoff
-cap=clipped_source('HairCap',[f for f in groups['body'] if max(verts[i].z for i,u in f)>1.62],hair,[scalpfield],.0038)
-for v in cap.data.vertices:
-    # At this height all scalp geometry belongs to the head.
-    pass
-for vg in cap.vertex_groups:vg.remove(list(range(len(cap.data.vertices))))
-cap.vertex_groups['head'].add(list(range(len(cap.data.vertices))),1.,'REPLACE')
-center=Vector((0,-.038,1.674))
-def scalp(theta,phi,offset=.004):
-    direction=Vector((math.sin(theta)*math.sin(phi),-math.sin(theta)*math.cos(phi),math.cos(theta)))
-    location,normal,_,_=head_bvh.ray_cast(center,direction,.3)
-    if location is None:location=center+Vector((direction.x*.092,direction.y*.101,direction.z*.105));normal=direction
-    return location+normal*offset,normal
-
-def lock(name,path,width,depth):
-    vs=[];fs=[];n=len(path);around=8
-    for i,(p,normal) in enumerate(path):
-        tangent=(path[min(n-1,i+1)][0]-path[max(0,i-1)][0]).normalized()
-        cross=tangent.cross(normal).normalized();t=i/(n-1)
-        taper=(.32+.68*math.sin(math.pi*min(.96,t+.08))**.6)*(1.-.74*t**5)
-        for j in range(around):
-            a=j*math.tau/around;vs.append(p+cross*math.cos(a)*width*taper+normal*math.sin(a)*depth*taper)
-    for i in range(n-1):
-        for j in range(around):a=i*around+j;b=i*around+(j+1)%around;fs.append((a,b,b+around,a+around))
-    fs.append(tuple(range(around-1,-1,-1)));fs.append(tuple((n-1)*around+j for j in range(around)))
-    return mesh(name,vs,fs,hair,'head')
+# ---- hair: a shell over the scalp carrying the photographed short hair -------
+# public/assets/textures/hair.png lies over the head's UV island (strand detail
+# and coverage). The shell is the scalp itself, cut to where that hair grows and
+# lifted a few millimetres off the skin; the shader alpha-tests it, so the
+# hairline is the photograph's own and the game picks the cut (fade, crop).
+HAIR_LIFT,HAIR_FUZZ=.0032,.0026
+hairimage=bpy.data.images.load(str(ROOT/'public'/'assets'/'textures'/'hair.png'))
+HW,HH=hairimage.size;_px=np.zeros(HW*HH*4,dtype=np.float32);hairimage.pixels.foreach_get(_px)
+coverage=_px.reshape(HH,HW,4)[:,:,3]          # (row 0 is the bottom of the image, v = 0)
+def hair_at(uv,reach=3):
+    if uv[0]<1.:return 0.
+    x=int(round((uv[0]-1.)*(HW-1)));y=int(round(uv[1]*(HH-1)))
+    return float(coverage[max(0,y-reach):y+reach+1,max(0,x-reach):x+reach+1].max(initial=0.))
+cap=source_mesh('HairCap',[f for f in groups['body'] if any(hair_at(uvs[u])>.04 for i,u in f)],hair)
+for v in cap.data.vertices:v.co+=v.normal*HAIR_LIFT
+cap.data.update();subdivide(cap,1)
+bpy.data.images.remove(hairimage)
+# A second, sparser shell further out: only the curls' tips reach it, so the
+# hair has a soft, broken silhouette instead of a painted cap's hard edge. Its
+# UVs sit one unit further right (u in [2, 3]) so the shader can tell it apart.
+fuzz=cap.copy();fuzz.data=cap.data.copy();fuzz.name='HairFuzz';fuzz.data.name='HairFuzz';bpy.context.collection.objects.link(fuzz)
+for v in fuzz.data.vertices:v.co+=v.normal*HAIR_FUZZ
+for loop in fuzz.data.uv_layers['UVMap'].data:loop.uv=(loop.uv[0]+1.,loop.uv[1])
+fuzz.data.update()
 
 def merge(pieces,name):
     if not pieces:return
@@ -623,153 +705,16 @@ def merge(pieces,name):
     bpy.ops.object.join();o=bpy.context.object;o.name=name;o.data.name=name
     # Only one skinning modifier is retained by join; all pieces share the same rig.
     o.select_set(False);return o
-lids=merge(blink_lids,'Details_Lids')
-# Closed lid shapes live inside the head at rest and emerge only during the
-# brief blink. Real eyelids cover the globe without folding the cheek mesh.
-for v in lids.data.vertices:v.co.y+=.042
-lids.shape_key_add(name='Basis',from_mix=False)
-lid_close=lids.shape_key_add(name='Blink',from_mix=False)
-for v in lid_close.data:v.co.y-=.042
-
-for style in range(6):
-    pieces=[]
-    if style==2:
-        # Rounded curls distributed across the scalp rather than a flat disk.
-        for i in range(42):
-            phi=i*2.399963;theta=math.acos(1.-(i+.5)/42*1.18)
-            front=math.cos(phi);limit=1.23 if front>.3 else 1.63 if front>-.4 else 1.94
-            if theta>limit:theta=limit-.035
-            p,n=scalp(theta,phi,.008)
-            curl=sphere('Curl',p,(.027,.025,.022),hair,segments=12,rings=8);pieces.append(curl)
-            # A raised curl crest gives a readable sculpted coil in close-ups.
-            tangent=n.cross(Vector((0,1,0))).normalized();bitangent=n.cross(tangent)
-            curlvs=[];curlfaces=[];major=12;minor=4
-            for j in range(major):
-                a=j*math.tau/major;radial=tangent*math.cos(a)+bitangent*math.sin(a)
-                for k in range(minor):
-                    b=k*math.tau/minor;curlvs.append(p+radial*(.013+.0017*math.cos(b))+n*(.017+.0017*math.sin(b)))
-            for j in range(major):
-                for k in range(minor):curlfaces.append((j*minor+k,j*minor+(k+1)%minor,((j+1)%major)*minor+(k+1)%minor,((j+1)%major)*minor+k))
-            pieces.append(mesh('Curl crest',curlvs,curlfaces,hair,'head'))
-    elif style in [4,5]:
-        # Slick hair follows the skull toward the tie; every strand is gently convex.
-        for i in range(15):
-            lateral=-.080+(i+.5)*.160/15
-            path=[]
-            for j in range(15):
-                t=j/14;angle=.34+.20*(abs(lateral)/.080)**1.2+2.20*t
-                direction=Vector((lateral,-.099*math.cos(angle),.106*math.sin(angle))).normalized()
-                p,n,_,_=head_bvh.ray_cast(center,direction,.3)
-                if p is None:p=center+direction*.1;n=direction
-                p=p+n*(.008+.004*math.sin(math.pi*t));path.append((p,n))
-            # Narrow forward tips avoid a flat comb edge across the forehead.
-            path.reverse()
-            pieces.append(lock('Swept lock',path,.0125,.0040))
-        for i in range(6):
-            phi0=-.83+i*.32;path=[]
-            for j in range(12):
-                t=j/11
-                p,n=scalp(.32+.94*t,phi0-.30*(1-t),.007+.009*math.sin(math.pi*t))
-                path.append((p,n))
-            pieces.append(lock('Sleek swept fringe',path,.011,.0035))
-        if style==4:
-            for i in range(7):
-                a=i*math.tau/7;points=[(.012*math.cos(a),.073,1.725),(.014*math.cos(a),.107,1.667),(.019*math.cos(a),.101,1.592),(.013*math.cos(a),.078,1.548)]
-                pieces.append(tube('Ponytail lock',points,.010,hair,resolution=2))
-            pieces.append(tube('Hair tie',[(math.cos(a)*.020,.086+math.sin(a)*.009,1.699)for a in [i*math.tau/24 for i in range(24)]],.0025,accent,resolution=1,closed=True))
-        else:
-            pieces.append(sphere('Bun core',(0,.050,1.783),(.037,.033,.027),hair,segments=24,rings=14))
-            for i in range(6):
-                a=i*math.tau/6;points=[]
-                for j in range(9):
-                    t=j/8;ang=a+t*2.1;points.append((math.cos(ang)*.038*math.sin(math.pi*t),.050+math.sin(ang)*.034*math.sin(math.pi*t),1.757+.052*t))
-                pieces.append(tube('Bun coil',points,.004,hair,resolution=1))
-    elif style==3:
-        bobvs=[];bobfs=[];around=32;layers=6
-        for row in range(layers):
-            t=row/(layers-1)
-            for i in range(around+1):
-                phi=.80+(math.tau-1.60)*i/around
-                top,n=scalp(1.52+.25*max(0.,-math.cos(phi)),phi,.009)
-                bottom=Vector((math.sin(phi)*.109,-.035-math.cos(phi)*.097,1.558+.012*max(0.,math.cos(phi))))
-                q=top.lerp(bottom,t)
-                q+=Vector((math.sin(phi),-math.cos(phi),0))*(.007*math.sin(math.pi*t))
-                bobvs.append(q)
-        for row in range(layers-1):
-            for i in range(around):
-                a=row*(around+1)+i;bobfs.append((a,a+1,a+around+2,a+around+1))
-        bob=mesh('Bob silhouette',bobvs,bobfs,hair,'head');recalc(bob)
-        thickness=bob.modifiers.new('Rounded bob edge','SOLIDIFY');thickness.thickness=.003;thickness.use_rim_only=True;bake(bob,thickness);pieces.append(bob)
-        for i in range(16):
-            phi=.83+(math.tau-1.66)*(i+.5)/16;path=[]
-            top,n=scalp(.34,phi,.012)
-            middle,mn=scalp(1.52+.25*max(0.,-math.cos(phi)),phi,.012)
-            bottom=Vector((math.sin(phi)*.111,-.035-math.cos(phi)*.099,1.560+.012*max(0.,math.cos(phi))))
-            for j in range(15):
-                t=j/14
-                if t<.55:p,normal=scalp(.34+(1.20+.25*max(0.,-math.cos(phi)))*t/.55,phi+.055*math.sin(math.pi*t),.014)
-                else:
-                    u=(t-.55)/.45;p=middle.lerp(bottom,u);normal=Vector((math.sin(phi),-math.cos(phi),0)).normalized();p+=normal*(.004+.007*math.sin(math.pi*u))
-                path.append((p,normal))
-            pieces.append(lock('Bob sculpted section',path,.0160,.0048))
-        for i in range(6):
-            phi=-.88+i*.34;path=[]
-            for j in range(10):
-                t=j/9;p,n=scalp(.37+.93*t,phi-.16*(1-t),.010+.008*math.sin(math.pi*t));path.append((p,n))
-            pieces.append(lock('Bob fringe',path,.0125,.0040))
-    else:
-        # Short/medium swept cuts: flattened tapered locks ride the real curved skull.
-        number=18
-        for i in range(number):
-            phi0=-math.pi+(i+.5)*math.tau/number;front=math.cos(phi0)
-            end=1.27 if front>.25 else 1.57 if front>-.45 else 1.87
-            if style==3:end+=.13 if front<.15 else .04
-            path=[]
-            for j in range(13):
-                t=j/12;theta=.18+(end-.10 if style==0 and front>.25 else end)*t
-                sweep=(.10 if style==0 else .48 if style==1 else .24)*math.sin(math.pi*t)
-                phi=phi0+sweep;lift=(.009 if style==0 else .011 if style==1 else .014)*math.sin(math.pi*t)
-                if style==1 and front>.25:lift+=.005*(1-t)
-                p,n=scalp(theta,phi,.004+lift);path.append((p,n))
-            pieces.append(lock('Sculpted lock',path,.0135 if style==0 else .0145,.0040 if style==0 else .0045))
-        # A few overlapping fringe locks make a soft asymmetric front silhouette.
-        for i in range(6):
-            phi0=-.88+i*.34;path=[]
-            for j in range(11):
-                t=j/10;p,n=scalp(.68+.61*t,phi0-(.12 if style==0 else .35)*(1-t),.010+.007*math.sin(math.pi*t));path.append((p,n))
-            pieces.append(lock('Fringe lock',path,.0115,.0035))
-    merge(pieces,'Hair_'+str(style))
 
 # One material batch per accessory family keeps gameplay draw calls modest.
-protected=[body,tee,pants,cap]
-for mat in [white,sole,accent,shirtmat,sclera,iris,pupil,hair,mouth]:
-    pieces=[o for o in list(bpy.context.scene.objects) if o.type=='MESH' and o not in protected and not o.name.startswith('Hair_') and len(o.data.materials)==1 and o.data.materials[0]==mat]
+protected=[body,tee,pants,cap,fuzz]
+for mat in [white,sole,accent,shirtmat]:
+    pieces=[o for o in list(bpy.context.scene.objects) if o.type=='MESH' and o not in protected and len(o.data.materials)==1 and o.data.materials[0]==mat]
     merge(pieces,'Details_'+mat.name)
 for o in bpy.context.scene.objects:
     if o.type=='MESH':
         o.data.name=o.name
         for poly in o.data.polygons:poly.use_smooth=True
-# Accessory expressions follow the actual face morphs. Previously the brow
-# skin moved underneath static eyebrows and the eye surfaces never blinked.
-for obj in list(bpy.context.scene.objects):
-    if obj.type!='MESH':continue
-    shapes=[]
-    if obj.name=='Details_Hair':shapes=['BrowsRaised']
-    elif obj.name=='Details_Mouth':shapes=['Smile','MouthSerious']
-    elif obj.name in ['Details_Sclera','Details_Iris','Details_Pupil']:shapes=['Blink']
-    elif obj.name=='Details_Shoe':shapes=['Blink'] # includes the tiny eye glints
-    if not shapes:continue
-    obj.shape_key_add(name='Basis',from_mix=False)
-    for name in shapes:
-        key=obj.shape_key_add(name=name,from_mix=False)
-        for i,v in enumerate(obj.data.vertices):
-            x,y,z=v.co
-            if name=='BrowsRaised':key.data[i].co.z+=.010
-            elif name in ['Smile','MouthSerious']:
-                key.data[i].co.z+=(.012 if name=='Smile' else -.008)*min(1.,abs(x)/.028)
-            elif name=='Blink' and z>1.60:
-                key.data[i].co.z=1.6487+(z-1.6487)*.06
-
 # Athletic silhouettes are sculpted around the retained rest bones. Contact reach,
 # grip origins and the rig contract remain identical; only the visible volumes change.
 limb_ends={}
@@ -880,8 +825,6 @@ print('Crotch height',round(CROTCH,3))
 print('Athlete exported:',len(body.data.vertices),'visible skin vertices;',len(positions),'deform bones')
 if '--preview' in sys.argv:
     # CPU proof render is available without claiming the team's display server.
-    for o in bpy.context.scene.objects:
-        if o.name.startswith('Hair_'):o.hide_render=o.name!='Hair_0'
     world=bpy.data.worlds.new('Studio');bpy.context.scene.world=world;world.use_nodes=True
     world.node_tree.nodes['Background'].inputs[0].default_value=(.13,.17,.20,1);world.node_tree.nodes['Background'].inputs[1].default_value=.65
     for loc,energy,size in [((-3,-4,5),500,5),((3,-1,3),220,3),((0,3,4),600,3)]:

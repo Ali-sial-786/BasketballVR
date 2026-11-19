@@ -31,6 +31,7 @@ export class PlayerView {
     const scale = (player.height || CONFIG.player.heights[player.id]) / 1.8;
     this.h = new Humanoid({ team: player.team === 0 ? 'home' : 'away', headgear: 'bare', skin: SKINS[player.id], hair: [0x30251e, 0x191715, 0x1e1915, 0x503829][player.id], seed: player.id * 13 + 5, scale });
     this.h.setNumber([1, 7, 23, 11][player.id]);
+    this.h.setSkinMap(['light', 'dark', 'dark', 'light'][player.id]);   // photographed skin, tinted to SKINS (humanoid.js SKIN_MAPS)
     // Everyone wears their own kit: sleeves, bands, shoes and a haircut.
     this.h.setGear([{ wristbands: true, color: 0xf1ead6, shoe: 0xf2f2ee, fade: 0.55 }, { headband: true, leg: 'L', color: 0xf1ead6, shoe: 0x1b1d22 },
       { sleeve: 'R', color: 0x17191d, shoe: 0xf2f2ee, fade: 0.85 }, { headband: true, wristbands: true, color: 0x17191d, shoe: 0xc45d3e, fade: 0.3 }][player.id]);

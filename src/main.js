@@ -7,7 +7,7 @@ import { Vec3 } from './physics/math.js';
 import { Input } from './input/input.js';
 import { Arena } from './render/arena.js';
 import { PlayerView, HandsView } from './render/athletes.js';
-import { loadAthlete, setFabric } from './render/humanoid.js';
+import { loadAthlete, setFabric, setSkinMaps } from './render/humanoid.js';
 import { loadClips } from './render/clips.js';
 import { loadCrowd } from './render/crowd.js';
 import { Pipeline, loadLook } from './render/pipeline.js';
@@ -28,7 +28,7 @@ function fail(error) {
 async function init() {
   await Promise.all([loadAthlete(`${import.meta.env.BASE_URL}assets/models/`), loadClips(`${import.meta.env.BASE_URL}assets/anim/`), loadCrowd(`${import.meta.env.BASE_URL}assets/models/`)]);
   const look = await loadLook(`${import.meta.env.BASE_URL}assets/textures/`);
-  setFabric(look.jerseyNormal);
+  setFabric(look.jerseyNormal); setSkinMaps(look.skin);
   const settings = loadSettings(), audio = new Audio(); audio.enabled = settings.sound;
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75)); renderer.setSize(innerWidth, innerHeight);
