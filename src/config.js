@@ -23,9 +23,9 @@ export const CONFIG = {
 // bite: chance an AI defender leaves their feet for a pump fake.
 // jumpiness: how often an AI closeout leaves the floor to challenge a jump shot.
 export const DIFFICULTIES = {
-  rookie: { name: 'Rookie', assist: 0.9, aimCone: 0.7, aiSpeed: 3.2, aiAccuracy: 0.65, stealRate: 0.12, greenWindow: 0.12, react: 0.34, bite: 0.65, resist: 0.05, jumpiness: 0.28 },
-  park: { name: 'Park', assist: 0.7, aimCone: 0.5, aiSpeed: 3.9, aiAccuracy: 0.8, stealRate: 0.22, greenWindow: 0.075, react: 0.23, bite: 0.42, resist: 0.2, jumpiness: 0.38 },
-  allstar: { name: 'All-star', assist: 0.4, aimCone: 0.3, aiSpeed: 4.5, aiAccuracy: 0.9, stealRate: 0.34, greenWindow: 0.05, react: 0.15, bite: 0.2, resist: 0.36, jumpiness: 0.48 },
+  rookie: { name: 'Rookie', assist: 0.9, aimCone: 0.7, aiSpeed: 3.2, aiAccuracy: 0.65, stealRate: 0.12, greenWindow: 0.12, react: 0.34, bite: 0.65, resist: 0.05, jumpiness: 0.28, dunk: 0.35 },
+  park: { name: 'Park', assist: 0.7, aimCone: 0.5, aiSpeed: 3.9, aiAccuracy: 0.8, stealRate: 0.22, greenWindow: 0.075, react: 0.23, bite: 0.42, resist: 0.2, jumpiness: 0.38, dunk: 0.55 },
+  allstar: { name: 'All-star', assist: 0.4, aimCone: 0.3, aiSpeed: 4.5, aiAccuracy: 0.9, stealRate: 0.34, greenWindow: 0.05, react: 0.15, bite: 0.2, resist: 0.36, jumpiness: 0.48, dunk: 0.7 },
 };
 export const MODES = {
   '1v1': { name: '1v1 · ISO BALL', short: '1v1', subtitle: 'Just you and your defender. First to 11.' },

@@ -594,7 +594,9 @@ export class GameEngine {
       p.dunkJump = true; p.jumpVel = P.dunkJump;
       const flight = P.dunkJump / CONFIG.ball.gravity;
       p.leap = toward.scale(clamp((gap - 0.55) / flight, 0, 5.2));
-      if (this.ballState !== 'held') { this.beginGather(p); this.ballState = 'held'; this.charge = CONFIG.shot.takeoff; }
+      const human = p.id === 0 && !this.preview;
+      if (human && this.ballState !== 'held') { this.beginGather(p); this.ballState = 'held'; this.charge = CONFIG.shot.takeoff; }
+      if (!human && p.action !== 'shooting') { this.beginGather(p); p.charge = CONFIG.shot.takeoff; }
       p.stamina = Math.max(0, p.stamina - 14);
       p.action = 'shooting'; p.actionTime = 1.2;
       this.emit('jump', { player: p.id, dunk: true });

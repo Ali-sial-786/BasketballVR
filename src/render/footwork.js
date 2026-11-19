@@ -13,7 +13,7 @@ export class Footwork {
     h.update();
     const root = h.root, scale = root.scale.y, speed = player.vel.length(), jump = player.jump + hop;
     const nominal = {};
-    const width = stance?.width ?? (player.defending ? 0.25 : gathered ? 0.15 : 0.17);
+    const width = stance?.width ?? (player.defending ? 0.3 : gathered ? 0.16 : 0.19);
     const strong = player.side > 0 ? 'R' : 'L';
     for (const side of ['L', 'R']) {
       const sign = side === 'L' ? 1 : -1;
@@ -64,7 +64,8 @@ export class Footwork {
     }
     for (const side of ['L', 'R']) {
       const sign = side === 'L' ? 1 : -1;
-      const pole = root.localToWorld(V(sign * (player.defending ? 0.24 : 0.18), 0.48, 0.65));
+      // Knees track over the toes: forward, only a little out.
+      const pole = root.localToWorld(V(sign * (player.defending ? 0.14 : 0.12), 0.5, 0.8));
       h.ikLeg(side, this.feet[side], pole);
       const rotation = root.quaternion.clone();
       if (this.swing?.side === side && !player.defending) {

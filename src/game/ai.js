@@ -50,6 +50,12 @@ function handle(g, p, dt, target, diff) {
   const beaten = nearest.stagger > 0 || nearest.jump > 0.1 || between < 0.35 || gap > 2.4;
   let cap = diff.aiSpeed * CONFIG.player.ballTax;
   if (g.needsClear) { target.set(p.pos.x * 0.6, 0, 1.2); p.defending = gap < 1.3; return cap * 1.15; }
+  if (p.action === 'shooting' && p.dunkJump) {
+    // In the air on a dunk: throw it down once the ball is over the ring.
+    target.copy(p.pos);
+    if (p.jump > 0.3 && g.canFinishDunk(p)) g.shoot(p, { forceDunk: true });
+    return cap;
+  }
   if (p.action === 'shooting') {
     p.charge += dt;
     const finishing = dist < 2.9;
@@ -116,6 +122,10 @@ function handle(g, p, dt, target, diff) {
     if (g.shotClock < 4) urge = Math.max(urge, range ? 6 : 2.5);
     if (g.shotClock < 1.6) urge = 60;
     if (urge && rng() < dt * urge) {
+      // A clear lane at the rim, at speed: take off and dunk it.
+      if (dist < 2.6 && dist > 0.8 && (open || attacking) && p.vel.length() > 1.5 && rng() < diff.dunk && g.laneClear(p)) {
+        g.jump(p, { boost: true }); if (p.dunkJump) return cap;
+      }
       g.beginGather(p); p.action = 'shooting'; p.actionTime = 1.4; p.charge = 0;
       p.aiRelease = shot.idealTime + (rng() - 0.5) * (1 - diff.aiAccuracy) * RELEASE_SPREAD;
       p.aiPump = dist > 2.9 && gap < 1.6 && !beaten && g.shotClock > 3 && rng() < (gap < 1.3 ? 0.55 : 0.25);
@@ -176,7 +186,8 @@ function defend(g, p, owner, dt, target, diff) {
   target.copy(p.percept).addScaled(unit(p.percept, hoop), cushion);
   if (!onBall && distance(owner.pos, hoop) < 2.7) target.set(owner.pos.x * 0.25, 0, -4.8);
   p.yaw = Math.atan2(mark.pos.x - p.pos.x, mark.pos.z - p.pos.z);
-  p.defending = near < 3.2;
+  // On the ball: a stance. Off it: help position, unless tight on the man.
+  p.defending = onBall ? near < 3.2 : near < 1.2;
   p.contesting = onBall && gathering && near < 1.9;
   if (onBall && owner.pump > 0 && p.pumpSeen !== owner.pumpCount) {
     p.pumpSeen = owner.pumpCount;

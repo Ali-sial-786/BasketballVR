@@ -164,7 +164,8 @@ test('a defender shadows the ball low, puts a hand straight up on a shot, and re
     for (let i = 0; i < 40; i++) tick({ defend: true, aim: { x: 0, z: 1 } });
   });
   const { g, tick, hand, joint } = s, low = Math.min(hand(0, 'L').y, hand(0, 'R').y), high = Math.max(hand(0, 'L').y, hand(0, 'R').y);
-  assert(low < 1.3 && high > 1.35, 'one hand on the ball, one in the passing lane');
+  // Down in a stance: one hand low on the ball, the other active at shoulder height.
+  assert(low < 1.1 && high > 1.2 && high - low > 0.3, 'one hand on the ball, one in the passing lane');
   const before = Math.min(hand(0, 'L').distanceTo(s.ball()), hand(0, 'R').distanceTo(s.ball()));
   tick({ defend: true, aim: { x: 0, z: 1 }, steal: true }); for (let i = 0; i < 8; i++) tick({ defend: true, aim: { x: 0, z: 1 } });
   assert.equal(g.human.action, 'reach'); assert(Math.min(hand(0, 'L').distanceTo(g.human.reach), hand(0, 'R').distanceTo(g.human.reach)) < before, 'the arm goes to the ball');

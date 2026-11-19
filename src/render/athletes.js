@@ -71,6 +71,11 @@ export class PlayerView {
     // Going up at the rim the ball is in one hand; the other arm clears space.
     const finishing = gathered && p.jump > 0.1 && hoopGap < 2.9 && !(human && engine.hand);
     const celebrating = engine.checkTimer > 0 && engine.lastScore && engine.time - engine.lastScore.time < 2 && engine.lastScore.team === p.team;
+    // What this athlete is doing without the ball, for posture: guarding the
+    // ball, helping off it, or ready to receive it.
+    const live = engine.checkTimer <= 0 && !celebrating && p.jump < 0.03 && !p.stagger && !following && p.action !== 'pass' && p.action !== 'reach';
+    const job = owns || !live ? null : p.defending ? 'guard' : rival || engine.possession !== p.team ? 'help' : 'ready';
+    this.job = job;
 
     // A stepback is a real two-foot hop. A jump shooter also hops into a wide,
     // parallel base as the ball arrives in the pocket; finishes at the rim do not.
@@ -99,10 +104,17 @@ export class PlayerView {
     const localVelocity = new THREE.Vector3().copy(p.vel).applyAxisAngle(UP, -this.bodyYaw);
     const localAcceleration = new THREE.Vector3().copy(p.acceleration || V(0, 0, 0)).applyAxisAngle(UP, -this.bodyYaw);
     let crouch = 0, lean = localVelocity.z * 0.028 + localAcceleration.z * 0.002, roll = -localVelocity.x * 0.02 - localAcceleration.x * 0.003, twist = 0;
+    // A modern athletic base: hips down, chest over the knees, never standing
+    // tall. A sprint rises out of it; a defensive slide stays down in it.
+    const running = THREE.MathUtils.smoothstep(Math.abs(localVelocity.z), 2.6, 5.2);
+    if (job === 'guard') { crouch += 0.13 - 0.04 * running; lean += 0.17; }
+    else if (job === 'help') { crouch += 0.13 * (1 - 0.7 * running); lean += 0.13; }
+    else if (job === 'ready') { crouch += 0.075 * (1 - 0.8 * running); lean += 0.09; }
+    else if (!owns && p.jump < 0.03) { crouch += 0.04 * (1 - running); lean += 0.05; }
     if (dribbling) {
       // The source take is hunched over the ball; a live handler plays taller,
       // eyes up, and only sinks when the ball needs covering.
-      crouch += 0.01 + 0.1 * p.protect; lean += -0.3 + 0.22 * p.protect;
+      crouch += 0.06 + 0.1 * p.protect; lean += -0.24 + 0.2 * p.protect;
       // Turn the lead shoulder into the defender to cover the ball.
       twist += hand * 0.3 * p.protect;
       if (move) {
@@ -152,6 +164,8 @@ export class PlayerView {
       h.update();
     }
     const localToWorld = point => this.root.localToWorld(point), bodyDir = v => v.applyQuaternion(this.root.quaternion);
+    // Hands placed relative to the body go down with the hips.
+    const sunk = point => localToWorld(point.setY(point.y - this.crouch / this.root.scale.y));
     const receiving = engine.passInfo?.to === p.id && ball.distanceTo(localToWorld(V(0, 1.35, 0.2))) < 2.1;
     const securing = owns && engine.catchFrom && !gathered;
     const eyeTarget = (owns && !securing || following) ? new THREE.Vector3().copy(CONFIG.hoop) : ball;
@@ -270,6 +284,21 @@ export class PlayerView {
         target = ball.clone().add(V(sign * 0.12, 0.02, 0).applyAxisAngle(UP, this.bodyYaw)); aim = [ALONG, bodyDir(V(-sign * 0.8, -0.5, 0.2))]; bend = 0.4; shape = ON_BALL; rate = 20;
       } else if (p.stagger) {
         target = localToWorld(V(sign * 0.62, 0.95 + Math.sin(p.stagger * 12 + sign) * 0.12, 0.22)); aim = [ALONG, bodyDir(V(0, -1, 0.2))]; bend = 0.35; shape = HALF_OPEN; rate = 12;
+      } else if (dribbling && !strong && !move) {
+        // The off arm rides up and out from the body, a guard on the ball.
+        target = sunk(V(sign * 0.36, 0.98 + 0.05 * p.protect, 0.2)); aim = [bodyDir(V(sign * 0.1, -0.35, 1)), bodyDir(V(-sign * 0.35, -0.9, 0.1))]; bend = 0.35; shape = HALF_OPEN; rate = 8;
+        pole = V(sign * 0.7, 1.05, -0.2);
+      } else if (job === 'ready') {
+        // Hands up and ready: a target for the pass, fingers up, palms to the ball.
+        const show = ballGap < 7 ? 1 : 0.6;
+        target = sunk(V(sign * 0.23, 1.06 + 0.08 * show, 0.3)); aim = [bodyDir(V(sign * 0.15, 0.85, 0.35)), bodyDir(V(-sign * 0.45, -0.1, 1))]; bend = 0.4; shape = HALF_OPEN; rate = 7;
+        pole = V(sign * 0.55, 1.0, -0.1);
+      } else if (job === 'help') {
+        // One arm out in the passing lane, the other ready at the chest.
+        const ballSide = sign * (localToWorld(V(1, 0, 0)).sub(this.root.position).dot(ball.clone().sub(this.root.position))) >= 0;
+        target = sunk(ballSide ? V(sign * 0.58, 1.12, 0.32) : V(sign * 0.26, 1.16, 0.28));
+        aim = [ALONG, bodyDir(ballSide ? V(0, -0.1, 1) : V(-sign * 0.5, -0.2, 1))]; bend = 0.3; shape = ballSide ? OPEN : HALF_OPEN; rate = 7;
+        pole = V(sign * 0.6, 1.0, -0.1);
       } else if (p.defending && !owns) {
         // Active hands. On the ball: mirror it low with the near hand and take
         // away the pass with the other. On a shot: hand straight up in its face.
@@ -283,8 +312,8 @@ export class PlayerView {
             target = localToWorld(V(sign * 0.3, 0, 0.36)).addScaledVector(V(toward.x, 0, toward.z).normalize(), 0.16);
             // Low hand: palm up under the dribble. High hand: palm out in the passing lane.
             target.y = p.jump + THREE.MathUtils.clamp(ball.y, 0.72, 1.25); aim = [ALONG, bodyDir(V(-sign * 0.35, 0.9, 0.25))]; bend = 0.3; shape = OPEN; rate = 11;
-          } else { target = localToWorld(V(sign * 0.56, 1.5, 0.2)); aim = [ALONG, bodyDir(V(-sign * 0.2, -0.1, 1))]; bend = 0.3; shape = OPEN; rate = 9; }
-        } else { target = localToWorld(V(sign * 0.5, side === 'R' ? 1.4 : 1.1, 0.26)); aim = [ALONG, bodyDir(V(-sign * 0.3, -0.3, 0.9))]; bend = 0.3; shape = HALF_OPEN; rate = 8; }
+          } else { target = sunk(V(sign * 0.48, 1.36, 0.36)); aim = [bodyDir(V(sign * 0.15, 0.7, 0.7)), bodyDir(V(-sign * 0.2, -0.1, 1))]; bend = 0.4; shape = OPEN; rate = 9; pole = V(sign * 0.7, 1.0, -0.2); }
+        } else { target = sunk(V(sign * 0.47, side === 'R' ? 1.3 : 1.0, 0.34)); aim = [bodyDir(V(sign * 0.15, 0.6, 0.8)), bodyDir(V(-sign * 0.2, -0.2, 1))]; bend = 0.4; shape = OPEN; rate = 8; pole = V(sign * 0.65, 0.95, -0.15); }
       }
       // Ease the IK in and out against the authored clip underneath.
       const follow = 1 - Math.exp(-dt * rate);
@@ -311,7 +340,12 @@ export class PlayerView {
         if (arm.fresh) arm.q.copy(_quat); else arm.q.slerp(_quat, follow);
       }
       if (arm.wrist > 0.25) h.setWorldQuat('hand' + side, _quat.copy(this.root.quaternion).multiply(arm.q));
-      else h.relaxWrist(side, 0.6);
+      else {
+        // A hand left to the clip hangs naturally: in line with the forearm,
+        // fingers a little curled, palm toward the thigh.
+        const along = h.worldPos('hand' + side, _fingers).sub(h.worldPos('elbow' + side, _palm)).normalize();
+        h.aimHand(side, along.addScaledVector(bodyDir(V(-sign, 0, -0.3)).normalize(), 0.22), bodyDir(V(-sign, 0, -0.3)), 0.5);
+      }
       // Fingers ease between shapes a little faster than the arm moves.
       const fingers = 1 - Math.exp(-dt * 18);
       arm.open += (shape[0] - arm.open) * fingers; arm.ball += (shape[1] - arm.ball) * fingers;
@@ -326,6 +360,11 @@ export class PlayerView {
       else if (dribbling && p.protect > 0.3) stance = { width: 0.2 + 0.06 * p.protect, lead: hand > 0 ? 'L' : 'R', split: 0.16 * p.protect };
       // Wide, feet parallel, shooting foot barely ahead: the same base every time.
       else if (jumper) stance = { width: 0.215, lead: p.side > 0 ? 'R' : 'L', split: 0.035 };
+      // Guarding: wide, slightly staggered, top foot toward the ball's side.
+      else if (this.job === 'guard') stance = { width: 0.26, lead: (p.id + Math.floor(time / 4)) % 2 ? 'L' : 'R', split: 0.1 };
+      else if (this.job === 'help') stance = { width: 0.27, lead: 'L', split: 0.05 };
+      else if (this.job === 'ready') stance = { width: 0.22, lead: p.side > 0 ? 'L' : 'R', split: 0.04 };
+      else if (dribbling) stance = { width: 0.21, lead: hand > 0 ? 'L' : 'R', split: 0.06 };
       this.footwork.update(dt, p, h, gathered, stance, hop);
       if (p.jump + hop < 0.02) h.groundGuard(0.004);
     }

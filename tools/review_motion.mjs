@@ -1,7 +1,7 @@
 // Contact sheets of the real game's motion: every cell is the live simulation
 // and rig, stepped at a fixed 60 Hz and rendered from a review camera.
 //   REVIEW_URL=http://127.0.0.1:5173 node tools/review_motion.mjs shot
-// Sheets: shot, handles, defense, pass, rim, views, hands. Output: test-results/motion-<sheet>.jpg
+// Sheets: shot, handles, defense, pass, rim, views, hands, shapes, play. Output: test-results/motion-<sheet>.jpg
 import { chromium } from 'playwright';
 import fs from 'node:fs/promises';
 const sheet = process.argv[2] || 'shot', url = process.env.REVIEW_URL || 'http://127.0.0.1:5173';
@@ -114,6 +114,13 @@ const data = await page.evaluate(async (sheet) => {
       view.h.setHandShape('L', open, ball); view.h.setHandShape('R', open, ball);
       const at = view.h.worldPos('handL', camera.position.clone()), a = p.yaw + orbit * Math.PI / 180;
       snap(`${name}: ${label}`, { from: [at.x + Math.sin(a) * 0.5, at.y - 0.06 + lift, at.z + Math.cos(a) * 0.5], at: [at.x, at.y - 0.07, at.z], fov: 30 });
+    }
+  } else if (sheet === 'play') {
+    // Live AI basketball, close up on each athlete in turn: stance, hands, feet.
+    g.startDemo('2v2'); run(240);
+    for (let k = 0; k < 16; k++) {
+      run(17); const t = k % 4, p = e.players[t];
+      snap(`${p.name} ${e.ownerId === p.id ? 'ball' : p.team === e.possession ? 'off-ball' : 'defending'}${p.jump > 0.05 ? ' air' : ''}`, { orbit: [40, -55, 140, -120][k % 4] + k * 9, dist: 3.0, height: 1.35, target: t, look: 1.0 });
     }
   } else if (sheet === 'views') {
     hud(true);
