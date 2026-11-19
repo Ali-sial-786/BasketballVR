@@ -1,0 +1,11 @@
+{
+  "about": "Texture layout shared by tools/rebuild_anatomy.py (UVs) and tools/build_skin_textures.py (images). Rects are [u0, v0, u1, v1] in OBJ UV space (v up); dst rects are [x0, y0, x1, y1] pixels, origin top left.",
+  "face": { "src": [0.637695, 0.145508, 0.997070, 0.821289], "size": [736, 1384], "hairSize": [368, 692] },
+  "body": { "size": [1024, 1024] },
+  "atlas": {
+    "size": [1024, 512],
+    "eye": { "src": [0.0, 0.0, 1.0, 1.0], "dst": [0, 0, 512, 512] },
+    "brow": { "src": [0.02, 0.23, 0.97, 0.70], "dst": [512, 0, 1024, 256] },
+    "lash": { "src": [0.04, 0.02, 0.99, 0.98], "dst": [512, 256, 1024, 512] }
+  }
+}

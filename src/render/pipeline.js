@@ -28,10 +28,15 @@ export async function loadLook(base = './assets/textures/') {
     try { const t = await new HDRLoader().loadAsync(base + 'hall.hdr'); t.mapping = THREE.EquirectangularReflectionMapping; return t; }
     catch { console.warn('Hall HDRI unavailable; using the procedural room.'); return null; }
   })();
-  const [hdr, woodColor, woodNormal, woodRough, jerseyNormal] = await Promise.all([hall,
+  // The athletes' photographed skin (CC0 MakeHuman): body and face per source
+  // photo, the short hair over the scalp, and the eye/brow/lash atlas.
+  const skin = Promise.all(['light_body', 'light_face', 'dark_body', 'dark_face'].map((name) => texture(`skin_${name}.jpg`, { color: true }))
+    .concat([texture('hair.png'), texture('face_detail.png', { color: true })]))
+    .then(([lightBody, lightFace, darkBody, darkFace, hair, detail]) => ({ light: { body: lightBody, face: lightFace }, dark: { body: darkBody, face: darkFace }, hair, detail }));
+  const [hdr, woodColor, woodNormal, woodRough, jerseyNormal, skinMaps] = await Promise.all([hall,
     texture('wood_color.jpg', { color: true, repeat: [18, 30] }), texture('wood_normal.jpg', { repeat: [18, 30] }),
-    texture('wood_rough.jpg', { repeat: [18, 30] }), texture('jersey_normal.jpg', { repeat: [1, 1] })]);
-  return { hdr, woodColor, woodNormal, woodRough, jerseyNormal };
+    texture('wood_rough.jpg', { repeat: [18, 30] }), texture('jersey_normal.jpg', { repeat: [1, 1] }), skin]);
+  return { hdr, woodColor, woodNormal, woodRough, jerseyNormal, skin: skinMaps };
 }
 
 export class Pipeline {

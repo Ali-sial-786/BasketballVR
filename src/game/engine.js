@@ -52,7 +52,7 @@ export class GameEngine {
     if (mode === 'contest') this.placeAtRack();
     this.updateOwnedBall(0);
     this.toast(mode === 'contest' ? 'MAKE IT RAIN.' : mode === 'practice' ? 'FIND YOUR RHYTHM.' : 'CHECK BALL.',
-      mode === 'contest' ? '25 balls · 70 seconds · gold balls count double' : mode === 'practice' ? 'Hold to gather. Release at the top.' : 'First to 11 · win by 2 · 2s and 3s');
+      mode === 'contest' ? '25 balls · 70 seconds · gold balls count double' : mode === 'practice' ? 'Pick it up, rise and let it fly.' : 'First to 11 · win by 2 · 2s and 3s');
     this.emit('recenter');
   }
   pause() {
@@ -400,7 +400,7 @@ export class GameEngine {
     }
     if (this.mode === 'practice') {
       if (this.flightAge > 2.6 || (ball.floorHits > 0 && this.flightAge > 1.1)) {
-        if (this.shot && !this.shot.resolved) { this.reportShot(false); this.toast('NEXT ONE.', this.lastResult?.label || 'Release at the top of your jump.'); }
+        if (this.shot && !this.shot.resolved) { this.reportShot(false); this.toast('NEXT ONE.', this.lastResult?.label || 'Same motion, every time.'); }
         this.giveBall(this.human); this.shot = null;
       }
       return;

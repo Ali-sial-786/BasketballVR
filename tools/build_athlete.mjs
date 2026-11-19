@@ -18,10 +18,15 @@
 //    part is simplified with meshoptimizer using normals as attributes, 4
 //    skin weights per vertex, and ambient occlusion is ray-traced into the
 //    vertices (armpits, collar, crotch, ears, between fingers, ...).
+//  * Textures: UVs are carried from the source through clipping, painting,
+//    welding (seams stay split) and simplification (seams are kept). The
+//    head's UV island sits at u in [1, 2] (the full-density face texture), the
+//    rest of the skin at u in [0, 1] (body texture); eyes, brows and lashes use
+//    the face atlas (tools/face_atlas.json).
 // Per-vertex data: position f32x3, normal i8x3 + kit i8, colour u8x3 + AO u8,
-// joints u8x4, weights u8x4; indices u16.
+// joints u8x4, weights u8x4, uv u16x2 (normalised, u stored / 3); indices u16.
 // Kit slots: 0 fixed colour, 1 shirt, 2 trim, 3 headgear, 4 trousers, 5 skin,
-// 6 hair, 7 shirt panel, 8 lips, 9 eyes.
+// 6 hair, 7 shirt panel, 8 lips, 9 eyes, 10 brows and lashes.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -86,7 +91,7 @@ const si = Object.fromEntries(SRC.map((n, i) => [n, i]));
 
 // ------------------------------------------------------------------ tunables
 const HEAD_ANCHOR = SJ.head.slice();           // Courtside's playful_head pivot (neck01 joint)
-const HEAD_K = 0.92;                           // sporty head, ~1.2x life once the body is life size
+const HEAD_K = 1.0;                            // life-size adult head (chin to crown ~24 cm on the 1.80 m body)
 const ARM_UPPER = 1.18, ARM_FORE = 1.04;       // adult limb proportions (MakeHuman's upper arm is short)
 
 // Inverse of Courtside's playful_head scale (Blender Z-up -> glTF Y-up:
@@ -136,7 +141,7 @@ function armMove(p, w) {        // w: Float32Array(NS) weights
 
 // ------------------------------------------------------------------ parts
 // A part: { name, pos[], nrm[], w Float32Array(V*NS), kit[], col[], idx[] }
-const KIT = { fixed: 0, shirt: 1, trim: 2, headgear: 3, trousers: 4, skin: 5, hair: 6, panel: 7, lips: 8, eyes: 9 };
+const KIT = { fixed: 0, shirt: 1, trim: 2, headgear: 3, trousers: 4, skin: 5, hair: 6, panel: 7, lips: 8, eyes: 9, cards: 10 };
 const matColor = (m) => gltf.materials[m].pbrMetallicRoughness.baseColorFactor.slice(0, 3).map((c) => Math.pow(c, 1 / 2.2));
 // The source's rest hand is a relaxed one and is used as it is. The posed hand
 // shapes ride along as morph targets, per hand, for the game to blend.
@@ -145,7 +150,7 @@ const HAND_SHAPES = ['openL', 'openR', 'ballL', 'ballR', 'gripL', 'gripR'];
 // (grip: a fist round a handle, the shape a hand takes on a VR controller.)
 const SHAPE_SOURCE = { HandOpenL: 'openL', HandOpen: 'openR', HandBallL: 'ballL', HandBall: 'ballR', SupportGrip: 'gripL', HandGrip: 'gripR' };
 
-function newPart(name) { return { name, pos: [], nrm: [], w: [], kit: [], col: [], idx: [], morph: [] }; }
+function newPart(name) { return { name, pos: [], nrm: [], w: [], kit: [], col: [], idx: [], morph: [], uv: [] }; }
 function loadMesh(meshName, kitFn, triKeep = null, dropBones = null) {
   const mesh = gltf.meshes.find((m) => m.name === meshName);
   const names = (mesh.extras && mesh.extras.targetNames) || [];
@@ -153,6 +158,7 @@ function loadMesh(meshName, kitFn, triKeep = null, dropBones = null) {
   for (const prim of mesh.primitives) {
     const pos = acc(prim.attributes.POSITION), nrm = acc(prim.attributes.NORMAL);
     const jn = acc(prim.attributes.JOINTS_0), jw = acc(prim.attributes.WEIGHTS_0), idx = acc(prim.indices);
+    const tex = prim.attributes.TEXCOORD_0 != null ? acc(prim.attributes.TEXCOORD_0) : null;   // (glTF: v down)
     const morph = new Float64Array(pos.length);
     (prim.targets || []).forEach((t, ti) => { const a = MORPH[names[ti]]; if (!a || t.POSITION == null) return; const d = acc(t.POSITION); for (let k = 0; k < pos.length; k++) morph[k] += d[k] * a; });
     const shapes = HAND_SHAPES.map((shape) => { const ti = names.findIndex((x) => SHAPE_SOURCE[x] === shape), t = ti >= 0 && prim.targets ? prim.targets[ti] : null; return t && t.POSITION != null ? acc(t.POSITION) : null; });
@@ -187,6 +193,7 @@ function loadMesh(meshName, kitFn, triKeep = null, dropBones = null) {
       });
       p = armMove(p, w);
       part.pos.push(...p); part.nrm.push(...n); part.w.push(w); part.morph.push(shaped);
+      part.uv.push(...(tex ? [tex[v * 2], 1 - tex[v * 2 + 1]] : [0, 0]));
       const k = kitFn(p, mat, w);
       part.kit.push(k); part.col.push(...col);
     }
@@ -203,7 +210,7 @@ function loadMesh(meshName, kitFn, triKeep = null, dropBones = null) {
 }
 function compact(part) {
   const used = new Map(), out = newPart(part.name);
-  Object.assign(out, { ...part, pos: [], nrm: [], w: [], kit: [], col: [], idx: [], morph: [] });
+  Object.assign(out, { ...part, pos: [], nrm: [], w: [], kit: [], col: [], idx: [], morph: [], uv: [] });
   for (const v of part.idx) {
     let id = used.get(v);
     if (id === undefined) {
@@ -211,7 +218,7 @@ function compact(part) {
       out.pos.push(part.pos[v * 3], part.pos[v * 3 + 1], part.pos[v * 3 + 2]);
       out.nrm.push(part.nrm[v * 3], part.nrm[v * 3 + 1], part.nrm[v * 3 + 2]);
       out.w.push(part.w[v]); out.kit.push(part.kit[v]); out.col.push(part.col[v * 3], part.col[v * 3 + 1], part.col[v * 3 + 2]);
-      out.morph.push(part.morph?.[v] ?? null);
+      out.morph.push(part.morph?.[v] ?? null); out.uv.push(part.uv[v * 2], part.uv[v * 2 + 1]);
     }
     out.idx.push(id);
   }
@@ -219,7 +226,9 @@ function compact(part) {
 }
 const P3 = (part, v) => [part.pos[v * 3], part.pos[v * 3 + 1], part.pos[v * 3 + 2]];
 const N3 = (part, v) => [part.nrm[v * 3], part.nrm[v * 3 + 1], part.nrm[v * 3 + 2]];
-function pushV(part, p, n, w, kit, col = [1, 1, 1], morph = null) { part.pos.push(...p); part.nrm.push(...n); part.w.push(w); part.kit.push(kit); part.col.push(...col); part.morph.push(morph); return part.pos.length / 3 - 1; }
+const T2 = (part, v) => [part.uv[v * 2], part.uv[v * 2 + 1]];
+const lerp2 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+function pushV(part, p, n, w, kit, col = [1, 1, 1], morph = null, uv = [0, 0]) { part.pos.push(...p); part.nrm.push(...n); part.w.push(w); part.kit.push(kit); part.col.push(...col); part.morph.push(morph); part.uv.push(uv[0], uv[1]); return part.pos.length / 3 - 1; }
 function wOf(map) { const w = new Float32Array(NS); let s = 0; for (const [k, v] of Object.entries(map)) { w[si[k]] += v; s += v; } for (let i = 0; i < NS; i++) w[i] /= s || 1; return w; }
 function smoothNormals(part, from = 0) {
   const n = new Float64Array(part.pos.length);
@@ -298,13 +307,13 @@ function bvhOf(parts) {
 // Exact scalar-field clipping preserves smooth garment edges and skin weights.
 function clipField(part, field) {
   const out = newPart(part.name);
-  const vertex = i => ({p:P3(part,i),n:N3(part,i),w:part.w[i],k:part.kit[i],c:part.col.slice(i*3,i*3+3)});
-  const mixV=(a,b,t)=>{const w=new Float32Array(NS);for(let j=0;j<NS;j++)w[j]=mix(a.w[j],b.w[j],t);return {p:lerp(a.p,b.p,t),n:norm(lerp(a.n,b.n,t)),w,k:a.k,c:lerp(a.c,b.c,t)}};
+  const vertex = i => ({p:P3(part,i),n:N3(part,i),w:part.w[i],k:part.kit[i],c:part.col.slice(i*3,i*3+3),t:T2(part,i)});
+  const mixV=(a,b,t)=>{const w=new Float32Array(NS);for(let j=0;j<NS;j++)w[j]=mix(a.w[j],b.w[j],t);return {p:lerp(a.p,b.p,t),n:norm(lerp(a.n,b.n,t)),w,k:a.k,c:lerp(a.c,b.c,t),t:lerp2(a.t,b.t,t)}};
   for(let i=0;i<part.idx.length;i+=3){
     const poly=[vertex(part.idx[i]),vertex(part.idx[i+1]),vertex(part.idx[i+2])], clipped=[];
     for(let j=0;j<3;j++){const a=poly[j],b=poly[(j+1)%3],fa=field(a.p),fb=field(b.p);if(fa>=0)clipped.push(a);if((fa>=0)!=(fb>=0))clipped.push(mixV(a,b,fa/(fa-fb)));}
     if(clipped.length<3)continue;
-    const ids=clipped.map(q=>pushV(out,q.p,q.n,q.w,q.k,q.c));
+    const ids=clipped.map(q=>pushV(out,q.p,q.n,q.w,q.k,q.c,null,q.t));
     for(let j=1;j<ids.length-1;j++)out.idx.push(ids[0],ids[j],ids[j+1]);
   }
   return compact(out);
@@ -329,13 +338,13 @@ for (let v = 0; v < shirtBits.kit.length; v++) if (shirtBits.kit[v] === KIT.fixe
 // Accents: only the boot flashes (trim) are kept; the tennis shoulder blocks,
 // cuffs, crest and shorts insets are replaced by panels painted into the cloth.
 const accents = loadMesh('Details_Accent', () => KIT.trim, (c) => c[1] < 0.5);
-const brows = loadMesh('Details_Hair', () => KIT.hair);
-const sclera = loadMesh('Details_Sclera', () => KIT.eyes);
-const iris = loadMesh('Details_Iris', () => KIT.eyes);
-const pupil = loadMesh('Details_Pupil', () => KIT.eyes);
-const mouth = loadMesh('Details_Mouth', () => KIT.fixed);
+// Face: MakeHuman's eyes, eyebrow and eyelash cards (face atlas), and a hair
+// shell over the scalp carrying the photographed short hair (hair texture).
+const eyes = loadMesh('Details_Eyes', () => KIT.eyes);
+const brows = loadMesh('Details_Brows', () => KIT.cards);
+const lashes = loadMesh('Details_Lashes', () => KIT.cards);
 const hairCap = loadMesh('HairCap', () => KIT.hair);
-const hairStyle = loadMesh('Hair_0', () => KIT.hair);
+const hairFuzz = loadMesh('HairFuzz', () => KIT.hair);     // (a sparser outer shell: the curls' tips; uv at u in [2, 3])
 // (The source shorts mesh also carries Courtside's tennis wristbands, out at
 // the hands: drop them, they would show as dark bands under the gloves.)
 const shorts = loadMesh('Tailored_Shorts', () => KIT.trousers, (c) => !(Math.abs(c[0]) > 0.33 && c[1] > 0.95));
@@ -354,13 +363,13 @@ const legs = [];
 function paint(part, regions) {
   const out = newPart(part.name);
   const cache = new Map();
-  const vtx = (i) => ({ p: P3(part, i), n: N3(part, i), w: part.w[i], c: part.col.slice(i * 3, i * 3 + 3), k: part.kit[i] });
-  const mixV = (A, B, t) => { const w = new Float32Array(NS); for (let i = 0; i < NS; i++) w[i] = A.w[i] * (1 - t) + B.w[i] * t; return { p: lerp(A.p, B.p, t), n: norm(lerp(A.n, B.n, t)), w, c: lerp(A.c, B.c, t), k: A.k }; };
+  const vtx = (i) => ({ p: P3(part, i), n: N3(part, i), w: part.w[i], c: part.col.slice(i * 3, i * 3 + 3), k: part.kit[i], t: T2(part, i) });
+  const mixV = (A, B, t) => { const w = new Float32Array(NS); for (let i = 0; i < NS; i++) w[i] = A.w[i] * (1 - t) + B.w[i] * t; return { p: lerp(A.p, B.p, t), n: norm(lerp(A.n, B.n, t)), w, c: lerp(A.c, B.c, t), k: A.k, t: lerp2(A.t, B.t, t) }; };
   const emit = (poly, kit) => {
     const ids = poly.map((q) => {
-      const key = q.p.map((x) => Math.round(x * 1e6)).join(',') + '|' + q.n.map((x) => Math.round(x * 100)).join(',') + '|' + kit;
+      const key = q.p.map((x) => Math.round(x * 1e6)).join(',') + '|' + q.n.map((x) => Math.round(x * 100)).join(',') + '|' + kit + '|' + q.t.map((x) => Math.round(x * 1e5)).join(',');
       let id = cache.get(key);
-      if (id === undefined) { id = pushV(out, q.p, q.n, q.w, kit, q.c); cache.set(key, id); }
+      if (id === undefined) { id = pushV(out, q.p, q.n, q.w, kit, q.c, null, q.t); cache.set(key, id); }
       return id;
     });
     for (let j = 1; j + 1 < ids.length; j++) out.idx.push(ids[0], ids[j], ids[j + 1]);
@@ -388,7 +397,7 @@ function paint(part, regions) {
     const poly = [vtx(part.idx[k]), vtx(part.idx[k + 1]), vtx(part.idx[k + 2])];
     process(poly, poly[0].k, 0);
   }
-  Object.assign(part, { pos: out.pos, nrm: out.nrm, w: out.w, kit: out.kit, col: out.col, idx: out.idx, morph: out.morph });
+  Object.assign(part, { pos: out.pos, nrm: out.nrm, w: out.w, kit: out.kit, col: out.col, idx: out.idx, morph: out.morph, uv: out.uv });
 }
 // Shirt: bound neckline and armholes (trim). The wordmark, name and numbers
 // are printed onto the cloth at run time (src/render/kitprint.js), so the back
@@ -427,13 +436,14 @@ function toBones(w, y) {
   return { j: top, w: top.map((k) => b[k] / sum) };
 }
 
-// Weld (position + normal + kit + colour) and simplify with normals as attributes.
+// Weld (position + normal + kit + colour + uv: texture seams stay split) and
+// simplify with normals and UVs as attributes (meshoptimizer keeps the seams).
 function weld(part) {
   const map = new Map(), rm = new Uint32Array(part.pos.length / 3), out = newPart(part.name);
   for (let v = 0; v < part.pos.length / 3; v++) {
-    const k = [...P3(part, v).map((x) => Math.round(x * 2e4)), ...N3(part, v).map((x) => Math.round(x * 40)), part.kit[v], ...part.col.slice(v * 3, v * 3 + 3).map((x) => Math.round(x * 50))].join(',');
+    const k = [...P3(part, v).map((x) => Math.round(x * 2e4)), ...N3(part, v).map((x) => Math.round(x * 40)), part.kit[v], ...part.col.slice(v * 3, v * 3 + 3).map((x) => Math.round(x * 50)), ...T2(part, v).map((x) => Math.round(x * 2e4))].join(',');
     let id = map.get(k);
-    if (id === undefined) { id = pushV(out, P3(part, v), N3(part, v), part.w[v], part.kit[v], part.col.slice(v * 3, v * 3 + 3), part.morph?.[v] ?? null); map.set(k, id); }
+    if (id === undefined) { id = pushV(out, P3(part, v), N3(part, v), part.w[v], part.kit[v], part.col.slice(v * 3, v * 3 + 3), part.morph?.[v] ?? null, T2(part, v)); map.set(k, id); }
     rm[v] = id;
   }
   for (const i of part.idx) out.idx.push(rm[i]);
@@ -445,17 +455,18 @@ function weld(part) {
 function simplify(part, target, opts = {}) {
   const w = weld(part);
   if (!target || w.idx.length / 3 <= target) return compact(w);
-  const pos = Float32Array.from(w.pos), at = new Float32Array(w.pos.length / 3 * 4);
-  for (let v = 0; v < w.pos.length / 3; v++) { at[v * 4] = w.nrm[v * 3]; at[v * 4 + 1] = w.nrm[v * 3 + 1]; at[v * 4 + 2] = w.nrm[v * 3 + 2]; at[v * 4 + 3] = w.kit[v] / 4; }
+  // Attributes: normal, kit slot, uv (weighted so texture detail is not smeared across the face).
+  const pos = Float32Array.from(w.pos), A = 6, at = new Float32Array(w.pos.length / 3 * A);
+  for (let v = 0; v < w.pos.length / 3; v++) at.set([w.nrm[v * 3], w.nrm[v * 3 + 1], w.nrm[v * 3 + 2], w.kit[v] / 4, w.uv[v * 2], w.uv[v * 2 + 1]], v * A);
   const flags = opts.lockBorder ? ['LockBorder'] : [];
-  const [idx] = MeshoptSimplifier.simplifyWithAttributes(Uint32Array.from(w.idx), pos, 3, at, 4, [0.35, 0.35, 0.35, 1], null, target * 3, opts.err ?? 0.02, flags);
+  const [idx] = MeshoptSimplifier.simplifyWithAttributes(Uint32Array.from(w.idx), pos, 3, at, A, [0.35, 0.35, 0.35, 1, 2, 2], null, target * 3, opts.err ?? 0.02, flags);
   let out = Array.from(idx);
   if (out.length / 3 > target * 1.15 && !opts.noSloppy) {   // borders held it back: allow more error
-    const [idx2] = MeshoptSimplifier.simplifyWithAttributes(Uint32Array.from(w.idx), pos, 3, at, 4, [0.2, 0.2, 0.2, 1], null, target * 3, 0.08, flags);
+    const [idx2] = MeshoptSimplifier.simplifyWithAttributes(Uint32Array.from(w.idx), pos, 3, at, A, [0.2, 0.2, 0.2, 1, 1, 1], null, target * 3, 0.08, flags);
     out = Array.from(idx2);
   }
   if (out.length / 3 > target * 1.15 && opts.permissive) {   // distant LOD: seams may collapse too
-    const [idx3] = MeshoptSimplifier.simplifyWithAttributes(Uint32Array.from(w.idx), pos, 3, at, 4, [0.2, 0.2, 0.2, 0.5], null, target * 3, 0.1, ['Permissive']);
+    const [idx3] = MeshoptSimplifier.simplifyWithAttributes(Uint32Array.from(w.idx), pos, 3, at, A, [0.2, 0.2, 0.2, 0.5, 1, 1], null, target * 3, 0.1, ['Permissive']);
     out = Array.from(idx3);
   }
   w.idx = out;
@@ -471,13 +482,11 @@ const PLAN = [ // part, LOD0 tris, LOD1 tris (0 = dropped), opts
   [sole, 600, 60, {}],
   [shirtBits, 800, 70, {}],
   [accents, 450, 0, {}],
-  [hairCap, 1800, 450, {}],
-  [hairStyle, 2600, 650, {}],
-  [brows, 200, 0, {}],
-  [sclera, 360, 0, {}],
-  [iris, 260, 0, {}],
-  [pupil, 140, 0, {}],
-  [mouth, 140, 0, {}],
+  [hairCap, 3600, 700, {}],
+  [hairFuzz, 3600, 0, {}],
+  [eyes, 1200, 120, {}],
+  [brows, 400, 0, {}],
+  [lashes, 800, 0, {}],
 ];
 const lod0 = PLAN.map(([p, t0, , o]) => simplify(p, t0, o));
 const lod1 = PLAN.filter(([, , t1]) => t1 > 0).map(([p, , t1, o]) => simplify(p, t1, { ...o, lockBorder: false, err: 0.05, permissive: true }));
@@ -485,7 +494,7 @@ const lod1 = PLAN.filter(([, , t1]) => t1 > 0).map(([p, , t1, o]) => simplify(p,
 // ------------------------------------------------------------------ ambient occlusion
 // Cosine-weighted hemisphere rays against the whole LOD0 figure (bind pose).
 const AO_RAYS = 48, AO_DIST = 0.22;
-const occluders = lod0;
+const occluders = lod0.filter((p) => ![hairCap.name, hairFuzz.name, brows.name, lashes.name].includes(p.name));   // (alpha-tested shells and cards)
 const aoBVH = bvhOf(occluders);
 function bakeAO(part) {
   part.ao = new Float64Array(part.pos.length / 3);
@@ -524,6 +533,7 @@ lod1.forEach((p) => transferAO(p, lod0.find((q) => q.name === p.name)));
 
 // ------------------------------------------------------------------ write
 const MORPH_SCALE = 20000;          // position deltas are stored in 1/20 mm
+const UV_SCALE = [3, 1];            // stored uv = uv / UV_SCALE, normalised u16 (the head island at u in [1, 2], the outer hair shell in [2, 3])
 // Smooth vertex normals for a part with its vertices at `positions` (or at rest),
 // shared across vertices that sit at the same rest position.
 function shapeNormals(part, positions) {
@@ -545,7 +555,7 @@ for (const L of [lod0, lod1]) {
   for (const p of L) {
     const vc = p.pos.length / 3;
     if (vc > 65535) throw new Error(p.name + ' has too many vertices');
-    const nb = new Int8Array(vc * 4), cb = new Uint8Array(vc * 4), jb = new Uint8Array(vc * 4), wb = new Uint8Array(vc * 4);
+    const nb = new Int8Array(vc * 4), cb = new Uint8Array(vc * 4), jb = new Uint8Array(vc * 4), wb = new Uint8Array(vc * 4), ub = new Uint16Array(vc * 2);
     for (let v = 0; v < vc; v++) {
       for (let c = 0; c < 3; c++) { nb[v * 4 + c] = Math.round(p.nrm[v * 3 + c] * 127); cb[v * 4 + c] = Math.round(clamp(p.col[v * 3 + c], 0, 1) * 255); }
       nb[v * 4 + 3] = p.kit[v];
@@ -554,6 +564,7 @@ for (const L of [lod0, lod1]) {
       let s8 = 0;
       for (let c = 0; c < 4; c++) { jb[v * 4 + c] = t.j[c]; wb[v * 4 + c] = Math.round(t.w[c] * 255); s8 += wb[v * 4 + c]; }
       wb[v * 4] += 255 - s8;
+      ub[v * 2] = Math.round(clamp(p.uv[v * 2] / UV_SCALE[0], 0, 1) * 65535); ub[v * 2 + 1] = Math.round(clamp(p.uv[v * 2 + 1] / UV_SCALE[1], 0, 1) * 65535);
     }
     // Hand shapes, sparse: only the vertices a shape moves (or whose shading it changes).
     let morph;
@@ -572,7 +583,7 @@ for (const L of [lod0, lod1]) {
       });
     }
     parts.push({ name: p.name, vCount: vc, iCount: p.idx.length, ...(morph ? { morph } : {}),
-      pos: push(Float32Array.from(p.pos)), nrmKit: push(nb), col: push(cb), joints: push(jb), weights: push(wb), idx: push(Uint16Array.from(p.idx)) });
+      pos: push(Float32Array.from(p.pos)), nrmKit: push(nb), col: push(cb), joints: push(jb), weights: push(wb), uv: push(ub), idx: push(Uint16Array.from(p.idx)) });
   }
   lods.push({ parts, tris: parts.reduce((s, p) => s + p.iCount / 3, 0) });
 }
@@ -580,7 +591,7 @@ for (const L of [lod0, lod1]) {
 // Landmarks for gear: the skull (hair cap + forehead), eyes, head top.
 const bb = (parts, f) => { const b = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity]; for (const p of parts) for (let v = 0; v < p.pos.length / 3; v++) { const q = P3(p, v); if (f && !f(q)) continue; for (let c = 0; c < 3; c++) { b[c] = Math.min(b[c], q[c]); b[c + 3] = Math.max(b[c + 3], q[c]); } } return b; };
 const capB = bb([hairCap]);
-const eyeB = bb([sclera]);
+const eyeB = bb([eyes]);
 const faceB = bb([body], (q) => q[1] > eyeB[4] - 0.01 && q[1] < capB[4] && Math.abs(q[0]) < 0.03);
 const chinB = bb([body], (q) => q[1] > joints.neck[1] && q[2] > eyeB[2] - 0.02 && Math.abs(q[0]) < 0.02);
 const headCentre = [0, (capB[4] + chinB[1]) / 2 + 0.01, (capB[2] + faceB[5]) / 2];
@@ -595,7 +606,7 @@ const round = (a) => a.map((x) => Math.round(x * 1e5) / 1e5);
 fs.writeFileSync(path.join(outDir, 'athlete.json'), JSON.stringify({
   source: 'Courtside Athlete.glb (MakeHuman HM08 derived, CC0-1.0)', bones: BONES,
   joints: Object.fromEntries(Object.entries(joints).map(([k, v]) => [k, round(v)])),
-  shapes: HAND_SHAPES, shapeScale: MORPH_SCALE,
+  shapes: HAND_SHAPES, shapeScale: MORPH_SCALE, uvScale: UV_SCALE,
   headCentre: round(headCentre), headSize: round(headSize), skull: { c: round(skullC), r: round(skullR) }, headTop: Math.round(capB[4] * 1e4) / 1e4,
   eyeY: Math.round((eyeB[1] + eyeB[4]) / 2 * 1e4) / 1e4, chinY: Math.round(chinB[1] * 1e4) / 1e4, kit: KIT, lods,
 }));

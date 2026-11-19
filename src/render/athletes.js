@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CONFIG } from '../config.js';
-import { Humanoid, handGeometry } from './humanoid.js';
+import { Humanoid, handGeometry, skinMaterial } from './humanoid.js';
 import { applyClip, applyLocomotion, strideAt, MASK_LEGS, MASK_ARMS, MASK_TRUNK } from './clips.js';
 import { material, shadow } from './util.js';
 import { kitPrintTexture } from './kitprint.js';
@@ -31,6 +31,7 @@ export class PlayerView {
     const scale = (player.height || CONFIG.player.heights[player.id]) / 1.8;
     this.h = new Humanoid({ team: player.team === 0 ? 'home' : 'away', headgear: 'bare', skin: SKINS[player.id], hair: [0x30251e, 0x191715, 0x1e1915, 0x503829][player.id], seed: player.id * 13 + 5, scale });
     this.h.setNumber([1, 7, 23, 11][player.id]);
+    this.h.setSkinMap(['light', 'dark', 'dark', 'light'][player.id]);   // photographed skin, tinted to SKINS (humanoid.js SKIN_MAPS)
     // Everyone wears their own kit: sleeves, bands, shoes and a haircut.
     this.h.setGear([{ wristbands: true, color: 0xf1ead6, shoe: 0xf2f2ee, fade: 0.55 }, { headband: true, leg: 'L', color: 0xf1ead6, shoe: 0x1b1d22 },
       { sleeve: 'R', color: 0x17191d, shoe: 0xf2f2ee, fade: 0.85 }, { headband: true, wristbands: true, color: 0x17191d, shoe: 0xc45d3e, fade: 0.3 }][player.id]);
@@ -386,7 +387,8 @@ export class HandsView {
   constructor(scene, environment = null) {
     this.hands = {};
     for (const [name, side] of [['left', 'L'], ['right', 'R']]) {
-      const mat = new THREE.MeshPhysicalMaterial({ color: 0xc48b66, roughness: 0.62, metalness: 0, clearcoat: 0.03, envMap: environment, envMapIntensity: 0.38 });
+      // Your own hands wear the same photographed skin as your player.
+      const mat = skinMaterial(0xbb815a, { envMap: environment, envMapIntensity: 0.38 });
       const geometry = handGeometry(side), group = new THREE.Group(), hand = new THREE.Mesh(geometry, mat);
       hand.castShadow = true; hand.frustumCulled = false; group.add(hand); scene.add(group);
       // A slim band at the wrist, where the hand meets the (unseen) forearm.
@@ -397,7 +399,6 @@ export class HandsView {
       this.hands[name] = { group, hand, open: 0, ball: 0, grip: 0.5 };
     }
   }
-  setSkin(color) { for (const h of Object.values(this.hands)) h.hand.material.color.setHex(color); }
   update(input, engine, playing, settings = { dominant: 'right' }) {
     const k = 1 - Math.exp(-(1 / 72) * 18);
     for (const [name, h] of Object.entries(this.hands)) {

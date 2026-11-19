@@ -16,7 +16,8 @@ npm test          # Ball physics, shot model, match rules, complete AI games, tr
 npm run build    # Self-contained static site in dist/
 npm run preview  # Production build on localhost:4173
 npm run test:smoke # Launches Vite + Chromium and exercises desktop/touch flows
-npm run review:motion shot # Contact sheet of the live rig: shot, handles, defense, pass, rim or views
+npm run test:xr   # Plays in an emulated Quest (IWER): throw-to-shoot, no-swing release, dunk, gesture moves, boost, smooth running
+npm run review:motion shot # Contact sheet of the live rig: shot, handles, defense, pass, rim, views, hands, shapes or play
 ```
 
 The smoke runner and the motion review use `/usr/bin/chromium` by default. Set `CHROMIUM_PATH` for another installation, and optionally `SMOKE_URL` / `REVIEW_URL` for an already-running server. Screenshots and contact sheets go to `test-results/`. Fonts, models, animations and audio synthesis are served locally; there are no runtime CDN dependencies.
@@ -56,18 +57,19 @@ The default shooting hand is right; Settings can switch it. “Ball hand” and 
 
 | Input | Action |
 | --- | --- |
-| **Either grip → lift and release** | Gather, then shoot with a real upward flick. The ball leaves along your hand’s own line and arc; the difficulty level decides how much of that is forgiven. A soft flick falls short. A downward release returns to a dribble. |
-| **A real throw in 2v2** | Flat from the chest is a chest pass. Down and out is a bounce pass. |
-| **Ball-hand trigger → release** | Timed shooting. Gather and release in the green; a quick tap is a pump fake. On defense, trigger or grip reaches for a steal. |
-| **Low hand sweep across your body** | Natural crossover; sweep behind your hip for a wrap. |
-| **Ball-hand lower / upper face button** | Crossover / behind the back. Hold the left stick click with them for between the legs / hesitation. |
-| **Right stick up / down** | Spin / stepback. |
-| **Off-hand trigger** | Smart pass, or call for the ball. |
-| **Off-hand lower face button** | Jump. Reaching a tracked hand into a rising shot blocks it; touching one on the way down is goaltending. |
-| **Off-hand grip** | Defensive stance. |
-| **Left stick**, click | Move; click to sprint. |
+| **Ball-hand trigger → throw → let go** | Hold the trigger and the ball is in your palm. Shoot with a real shooting motion and let go at the release: the ball leaves from your hand with your hand’s own arc, line and power. Letting go without a throw is not a shot (the ball stays yours); a soft flick falls short. What counts as a natural release speed is learned from your own shots, so consistency is what makes shots, and the difficulty level sets how much error is forgiven. |
+| **A real throw in 2v2** | Flat from the chest is a chest pass. Down and out is a bounce pass. Straight down returns to a dribble. |
+| **Ball-hand A (X if left-handed)** | Jump: for a jump shot, a block or a rebound. Your view rises with the jump. |
+| **Off-hand trigger** | Boost, on offence and defence. Uses stamina (about eight seconds from full). |
+| **Boost + jump with the ball near the rim** | Facing the rim with nobody in the lane: a dunk take-off that carries you in under the ring. Get the ball over it and slam it down (or let go). |
+| **Either grip** | A dribble move, chosen by what you do as you press it: sweep the ball hand across your body for a crossover, low for between the legs, behind your hip for a wrap, turn your head for a spin, pull the hand back (or step back, or pull the stick back) for a stepback. No motion: crossover on the ball-hand grip, hesitation on the other. |
+| **Off-hand lower button, or ball-hand upper button** | Smart pass, or call for the ball. |
+| **Defence** | Hold a grip for a stance. Ball-hand trigger, or a real swipe of a hand through the ball, reaches for a steal. Jump with A and get a hand on a rising shot to block it; touching one on the way down is goaltending. |
+| **Left stick** | Move (radial dead zone, speed builds smoothly from zero). |
 | **Right stick left / right** | Snap turn 30° by default; smooth/off available. |
-| **Off-hand upper face button / right stick click** | In-headset pause menu. Point a controller and pull its trigger to choose a mode, change comfort settings, resume or leave VR. |
+| **Off-hand upper button / right stick click** | In-headset pause menu. Point a controller and pull its trigger to choose a mode, change comfort settings, resume or leave VR. |
+
+The score, shot clock and boost meter are on your off-hand wrist: raise it to read them. Calls (“BUCKET.”, “SHOT CLOCK.”) float briefly low in front of you.
 
 Use controller straps and a clear boundary. You can stay physically in one place; thumbstick locomotion does the running. **Comfort / blink** movement and snap turning are available. Tracking loss, focus loss and pauses discard stale throws; virtual movement is excluded from measured hand velocity.
 
@@ -76,7 +78,7 @@ Use controller straps and a clear boundary. You can stay physically in one place
 **Shooting.** The ball is a size 7 with real mass, air drag, backspin and Magnus lift, thrown at a regulation 457 mm ring and a glass board. Every shot is solved through that same flight model, then *your* errors are applied to the launch itself: speed and heading, not a target offset. That is why the same lapse that still drops from the elbow comes up short from the arc.
 
 - The jump shot is modeled on Klay Thompson’s form as coaches describe it (sources and limits in [REFERENCE_NOTES.md](REFERENCE_NOTES.md)): a small hop into a wide, parallel base with the shooting shoulder a touch ahead; the ball straight into the pocket at the shooting hip and straight up to a set point over the shooting eye, elbow in, **before the feet leave the floor**; a modest jump straight up and down; the push starting just after take-off and the ball gone at the top; the guide hand off early; the elbow locked out above the head with a loose wrist and held. It is quick: 0.62 s from gather to release, inside the 0.79 s catch-and-shoot window tracking data credits him with, on an arc that enters the rim at about 46°. No name or likeness is used in the game.
-- Hold to gather and release at the top of the jump. The meter beside the reticle is the motion, not a separate mini-game.
+- On desktop and touch, hold to gather and release at the top of the jump. The meter beside the reticle is the motion, not a separate mini-game. In a headset the release is your real throw (see above).
 - Early leaves the legs out of it (short); late pushes it long. The window is full size at the rim and the elbow and tightens with range.
 - A hand in your face, drifting feet and tired legs scatter the shot. A fadeaway is harder to contest but less accurate; straight off a catch you are in rhythm and the window is wider.
 - Backspin matters after the release: it checks the ball on the rim, drags a bank shot down off the glass, and decides the bounces.
@@ -101,7 +103,7 @@ Use controller straps and a clear boundary. You can stay physically in one place
 - **Crowd.** About 1,400 spectators, each a real figure built from the athlete model: seated, individually dressed (shirts, sleeves, trousers or shorts, caps, shoes), different builds, skin and hair, children among them. They shift in their seats, and get to their feet with their arms up in proportion to the play: a few for a bucket, most of the building for a dunk. Fans sit courtside round the floor; reserves in warm-ups fill both benches beside a scorer’s table.
 - **Arena.** Scrolling LED ribbon boards on two levels, a band of lit suites with guests at the rail, acoustic panelling, a lighting truss of spot fixtures with faint shafts in the haze, catwalks, line-array speakers, padded broadcast stanchions, banners, and a centre-hung scoreboard whose four video screens carry a **live telephoto feed** of the game above the score.
 - **Floor.** Plank relief, grain and gloss variation from a CC0 scanned wood floor under a clear coat. Reflections sharpen at grazing angles and ripple with the planks.
-- **Athletes.** Skin with mottling, fine grain, flush at the knees, elbows, knuckles, ears and nose, and patches of sweat sheen that move with the body. Striped crew socks, shoes with a team toe cap and heel. Each player wears their own kit: compression arm or leg sleeve, headband, wristbands, shoe colour, and a fade haircut.
+- **Athletes.** Photographed skin, eyes, brows and hair from MakeHuman's CC0 texture set: each player's skin is the nearer of a light- and a dark-skinned photo, tinted to his tone, with the face at the photo's full density; textured irises under a wet clear coat, seated in the lids; MakeHuman's eyebrow and eyelash cards; short curly hair on two alpha-tested shells over the scalp, cut by the game into fades. Flush at the knees, elbows, knuckles, ears and nose, and patches of sweat sheen that move with the body. Striped crew socks, shoes with a team toe cap and heel. Each player wears their own kit: compression arm or leg sleeve, headband, wristbands, shoe colour, and a fade haircut.
 - **Uniforms.** Cut like the real thing: the jersey is worn out and hangs from the chest and shoulder blades straight over the waistband; the shorts are loose, span from leg to leg down to a dropped crotch and flare to a bound hem above the knee. The garments are draped, not inflated: eased off the body, hung from whatever holds the cloth out above, relaxed until taut and kept clear of the skin and of each other (`tools/rebuild_anatomy.py`). The cloth is an eyelet-mesh polyester knit with a soft sheen at grazing angles, drape folds, yarn variation, rib-knit bindings and waistband, contrast side panels edged with piping, and twin-needle stitching at the hems. Lettering is two-colour tackle twill, pressed into the cloth: the wordmark and number on the chest, the player’s name and a large number on the back, in an original block alphabet drawn as strokes (`src/render/kitprint.js`), so it is identical on every device.
 - **Hands.** Each hand has three shapes it blends between: relaxed, open and flat (defending, contesting, blocking, reaching), and spread round the ball (shooting, catching, dribbling). The shapes are posed with real finger-joint rotations in `tools/rebuild_anatomy.py` and shipped as sparse morph targets. Wrists obey a wrist’s limits: a hand is aimed by where its fingers point and where its palm faces, and bends from the line of the forearm only as far as a wrist can (`Humanoid.aimHand`). A hand on the ball is seated on it: the palm goes to a chosen point on the ball and the wrist follows.
 - **Ball.** Eight panels, recessed channels and a pebbled grain that catches the lights; it turns with the simulated spin.
@@ -109,7 +111,7 @@ Use controller straps and a clear boundary. You can stay physically in one place
 - First-person desktop and touch use the athlete’s skinned arms; the shooting hand carries the ball a little wider there so it frames the rim instead of hiding it. Quest uses the tracked controller hands.
 - Motion: shooting form with a held follow-through, one-hand finishes, two-foot stepback hop, staggered between-the-legs stance, arm bar, active defensive hands, steal lunges, block reaches, chest/bounce/lob pass releases, catches, stumbles and celebrations, all eased in body space over the retargeted clips with planted-foot IK.
 - The supplied **Mixamo `Dribble _2_.fbx`** is retargeted onto the 17-bone athlete rig and supplies the dribbling weight shift; inverse kinematics fits the hand to the live ball. Walking, running and defense blend from Crease VR’s retargeted Quaternius clips.
-- Athletes are about **56k triangles** close up with a separate **9k** distant mesh; spectators are about 1,060 triangles in the lower rows and 330 beyond.
+- Athletes are about **60k triangles** close up with a separate **9k** distant mesh; spectators are about 1,060 triangles in the lower rows and 330 beyond. Six shared skin, hair and face textures (two skin photos at 1024 for the body and 736×1384 for the face, plus a hair layer and an eye/brow/lash atlas) take about 0.95 MB to download and about 26 MB of GPU memory with mipmaps.
 - Sound is synthesized: a steel rim, glass, a different net for a swish than for a ball that rattled in, sneaker chirps on hard cuts, shot-clock ticks, and a crowd murmur that swells after a make, a block or a broken ankle. Haptics follow the same events in the headset.
 - Five heat points trigger a 14-second hot streak with a wider release window. Perfect makes build heat faster.
 
@@ -145,6 +147,7 @@ The outdoor baseline was recorded from `fef750d` before the arena, anatomy, move
 | `src/xr/` | Session lifecycle, comfort preferences, world-space menu and headset HUD. |
 | `src/ui.js`, `src/style.css` | Desktop menu, HUD, release meter, shot report, results and help. |
 | `tools/review_motion.mjs` | Renders contact sheets of the live rig for reviewing poses and motion (`hands` and `shapes` are close-ups of the hands). |
+| `tools/xr_harness.mjs`, `tools/xr_smoke.mjs` | Plays the game in an emulated Quest headset (Meta’s IWER runtime) on a virtual clock, scripting controller poses and buttons frame by frame; the smoke test checks the headset controls end to end. |
 | `tools/build_crowd.mjs` | Builds the spectator model (`crowd.json` / `crowd.bin`) from the athlete. |
 
 ## Rebuilding character assets
@@ -159,11 +162,14 @@ For anatomy changes, install Blender 4.3+ (or `pip install bpy` and run the scri
 
 ```sh
 python3 tools/fetch_anatomy.py
+python3 tools/build_skin_textures.py      # skin, hair and face textures (Pillow + numpy)
 blender -b -t 6 --python tools/rebuild_anatomy.py
 node tools/build_athlete.mjs art-sources/generated/Athlete.glb
 ```
 
 The source builder derives from Courtside/Crease VR’s CC0 MakeHuman pipeline, retaining complete skin under the new armholes and neckline, adult eye/jaw proportions, and basketball tailoring. The jersey and shorts are tailored there too (hem heights, ease and fall are the constants at the top of the tailoring section); after changing them, rebuild the crowd as well. The offline converter bakes ambient occlusion and two mesh LODs into the compact runtime files. Generated source assets live in ignored `art-sources/`.
+
+The face is MakeHuman's own: its eye, eyebrow and eyelash proxies are fitted to the athlete with their `.mhclo` files, and the body keeps the base mesh's UVs through clipping, welding and simplification (seams stay split) into the runtime files. `tools/face_atlas.json` is the texture layout both Python tools share: the head's UV island is moved to u in [1, 2] and drawn from the full-density face texture, the rest of the skin from the 1024 body texture. The hair shell is cut to the coverage of `hair.png`, so rebuild the textures before the anatomy.
 
 To replace the dribble take with another user-supplied Mixamo FBX:
 

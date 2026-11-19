@@ -2,9 +2,17 @@
 // and checks the headset controls end to end.
 //   REVIEW_URL=http://127.0.0.1:5173 node tools/xr_smoke.mjs
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { openXR } from './xr_harness.mjs';
 
-const xr = await openXR();
+// Without REVIEW_URL, serve the game ourselves.
+let server = null, url = process.env.REVIEW_URL;
+if (!url) {
+  server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', '4174', '--strictPort'], { stdio: 'ignore' });
+  url = 'http://127.0.0.1:4174';
+  for (let i = 0; i < 60; i++) { try { if ((await fetch(url)).ok) break; } catch {} await new Promise(r => setTimeout(r, 250)); }
+}
+const xr = await openXR({ url });
 const q = (pitch = 0, yaw = 0) => { const cy = Math.cos(yaw / 2), sy = Math.sin(yaw / 2), cx = Math.cos(pitch / 2), sx = Math.sin(pitch / 2); return [cy * sx, sy * cx, -sy * sx, cy * cx]; };
 const rest = { head: { p: [0, 1.7, 0], pitch: -0.1 }, right: { p: [0.22, 1.05, -0.3], q: q(-0.2) }, left: { p: [-0.22, 1.05, -0.3], q: q(-0.2) } };
 async function path(side, keys, n) {
@@ -81,4 +89,4 @@ try {
 
   assert.deepEqual(xr.errors, [], 'no browser errors');
   console.log(`Headset: ${results.join(', ')} passed.`);
-} finally { await xr.close(); }
+} finally { await xr.close(); server?.kill(); }
