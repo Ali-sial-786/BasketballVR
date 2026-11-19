@@ -157,7 +157,8 @@ export class GameEngine {
     }
     if (p.leap && p.jump > 0) m.copy(p.leap);
     movePlayer(p, m, dt);
-    if (sprint && p.locoVel.lengthSq() > 0.4) p.stamina = Math.max(0, p.stamina - 15 * dt);
+    // (Net of recovery, a full tank is about eight seconds of boost.)
+    if (sprint && p.locoVel.lengthSq() > 0.4) p.stamina = Math.max(0, p.stamina - (CONFIG.player.staminaRegen + 11) * dt);
     if (cmd.jump) this.jump(p, { boost: sprint });
     if (cmd.moveAction) this.dribbleMove(p, cmd.moveAction);
     if (cmd.steal) this.trySteal(p);

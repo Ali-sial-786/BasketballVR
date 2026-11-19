@@ -13,7 +13,8 @@
     "test:smoke": "node tools/smoke.mjs",
     "record:demo": "node tools/capture_demo.mjs",
     "review:motion": "node tools/review_motion.mjs",
-    "build:crowd": "node tools/build_crowd.mjs"
+    "build:crowd": "node tools/build_crowd.mjs",
+    "test:xr": "node tools/xr_smoke.mjs"
   },
   "dependencies": {
     "three": "0.180.0"
